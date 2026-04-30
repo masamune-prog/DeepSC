@@ -22,8 +22,8 @@ from sklearn.preprocessing import normalize
 from w3lib.html import remove_tags
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--data-dir', default='europarl/train_data.pkl', type=str)
-parser.add_argument('--vocab-file', default='europarl/vocab.json', type=str)
+parser.add_argument('--data-dir', default='txt/train_data.pkl', type=str)
+parser.add_argument('--vocab-file', default='txt/vocab.json', type=str)
 parser.add_argument('--checkpoint-path', default='checkpoints/deepsc-Rayleigh', type=str)
 parser.add_argument('--channel', default='Rayleigh', type=str)
 parser.add_argument('--MAX-LENGTH', default=30, type=int)
@@ -160,7 +160,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     SNR = [0,3,6,9,12,15,18]
 
-    args.vocab_file = '/import/antennas/Datasets/hx301/' + args.vocab_file
+    args.vocab_file = args.vocab_file
     vocab = json.load(open(args.vocab_file, 'rb'))
     token_to_idx = vocab['token_to_idx']
     idx_to_token = dict(zip(token_to_idx.values(), token_to_idx.keys()))

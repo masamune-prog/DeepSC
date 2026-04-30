@@ -17,3 +17,5 @@ checkpoints/
 /checkpoints/deepsc-mi-awgn/*
 /checkpoints/deepsc-mi/Rayleigh/*
 /checkpoints/deepsc-Rayleigh/* 
+txt/
+*.tgz

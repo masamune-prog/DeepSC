@@ -22,10 +22,10 @@ import json
 from tqdm import tqdm
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--input-data-dir', default='europarl/en', type=str)
-parser.add_argument('--output-train-dir', default='europarl/train_data.pkl', type=str)
-parser.add_argument('--output-test-dir', default='europarl/test_data.pkl', type=str)
-parser.add_argument('--output-vocab', default='europarl/vocab.json', type=str)
+parser.add_argument('--input-data-dir', default='txt/en', type=str)
+parser.add_argument('--output-train-dir', default='txt/train_data.pkl', type=str)
+parser.add_argument('--output-test-dir', default='txt/test_data.pkl', type=str)
+parser.add_argument('--output-vocab', default='txt/vocab.json', type=str)
 
 SPECIAL_TOKENS = {
   '<PAD>': 0,
@@ -143,11 +143,7 @@ def decode(seq_idx, idx_to_token, delim=None, stop_at_end=True):
 
 
 def main(args):
-    data_dir = '/import/antennas/Datasets/hx301/'
-    args.input_data_dir = data_dir + args.input_data_dir
-    args.output_train_dir = data_dir + args.output_train_dir
-    args.output_test_dir = data_dir + args.output_test_dir
-    args.output_vocab = data_dir + args.output_vocab
+    print(args.input_data_dir)
 
     print(args.input_data_dir)
     sentences = []
