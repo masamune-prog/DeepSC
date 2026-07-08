@@ -1,0 +1,58 @@
+#!/bin/bash
+#PBS -N deepsc_bert
+#PBS -l select=1:ngpus=1
+#PBS -l walltime=24:00:00
+#PBS -j oe
+#PBS -o deepsc_job_output.log
+# ─── Environment ────────────────────────────────────────────────────────────
+cd "$PBS_O_WORKDIR"
+
+# Activate the project venv managed by uv
+source .venv/bin/activate
+
+# ─── Hyperparameters ────────────────────────────────────────────────────────
+CHANNEL="Rayleigh"
+CHECKPOINT_PATH="checkpoints/deepsc-bert-${CHANNEL}"
+BERT_MODEL="bert-base-multilingual-cased"
+
+# ─── Training ───────────────────────────────────────────────────────────────
+echo "=== Training DeepSC with BERT encoder ==="
+echo "Channel      : $CHANNEL"
+echo "BERT model   : $BERT_MODEL"
+echo "Checkpoint   : $CHECKPOINT_PATH"
+echo "Start time   : $(date)"
+
+mkdir -p "$CHECKPOINT_PATH" logs
+
+python -u main.py \
+    --use-bert-encoder \
+    --bert-model-name  "$BERT_MODEL" \
+    --channel          "$CHANNEL" \
+    --checkpoint-path  "$CHECKPOINT_PATH" \
+    --d-model          128 \
+    --dff              512 \
+    --num-layers       4 \
+    --num-heads        8 \
+    --batch-size       64 \
+    --epochs           80 \
+    --MAX-LENGTH       30 \
+    --MIN-LENGTH       4
+
+echo "=== Training finished : $(date) ==="
+
+# ─── Evaluation ─────────────────────────────────────────────────────────────
+echo "=== Evaluating ==="
+python performance.py \
+    --use-bert-encoder \
+    --bert-model-name  "$BERT_MODEL" \
+    --channel          "$CHANNEL" \
+    --checkpoint-path  "$CHECKPOINT_PATH" \
+    --d-model          128 \
+    --dff              512 \
+    --num-layers       4 \
+    --num-heads        8 \
+    --batch-size       64 \
+    --epochs           2 \
+    --MAX-LENGTH       30
+
+echo "=== Done : $(date) ==="

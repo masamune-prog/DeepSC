@@ -228,53 +228,95 @@ def SNR_to_noise(snr):
 def train_step(model, src, trg, n_var, pad, opt, criterion, channel, mi_net=None):
     model.train()
 
-    trg_inp = trg[:, :-1]
-    trg_real = trg[:, 1:]
-
     channels = Channels()
     opt.zero_grad()
-    
-    src_mask, look_ahead_mask = create_masks(src, trg_inp, pad)
-    
-    enc_output = model.encoder(src, src_mask)
-    channel_enc_output = model.channel_encoder(enc_output)
-    Tx_sig = PowerNormalize(channel_enc_output)
 
-    if channel == 'AWGN':
-        Rx_sig = channels.AWGN(Tx_sig, n_var)
-    elif channel == 'Rayleigh':
-        Rx_sig = channels.Rayleigh(Tx_sig, n_var)
-    elif channel == 'Rician':
-        Rx_sig = channels.Rician(Tx_sig, n_var)
+    if model.use_bert_encoder:
+        # src is a dict: {'input_ids': ..., 'attention_mask': ...} (BERT tokens)
+        # trg is also a dict with the same keys (auto-encoding: src == trg)
+        src_input_ids = src['input_ids'].to(device)
+        src_attn_mask = src['attention_mask'].to(device)       # 1=real, 0=pad
+        trg_input_ids = trg['input_ids'].to(device)
+
+        bert_pad_id = 0  # [PAD] token ID in BERT vocabulary
+        trg_inp = trg_input_ids[:, :-1]   # teacher-forced decoder input
+        trg_real = trg_input_ids[:, 1:]   # ground-truth shifted by one
+
+        # look-ahead mask for decoder self-attention
+        trg_mask = (trg_inp == bert_pad_id).unsqueeze(-2).type(torch.FloatTensor).to(device)
+        look_ahead_mask = subsequent_mask(trg_inp.size(-1)).type_as(trg_mask.data)
+        combined_mask = torch.max(trg_mask, look_ahead_mask)
+
+        # src padding mask for decoder cross-attention (invert BERT convention)
+        src_mask = (1 - src_attn_mask).unsqueeze(-2).type(torch.FloatTensor).to(device)
+
+        enc_output = model.encoder(src_input_ids, attention_mask=src_attn_mask)
+        channel_enc_output = model.channel_encoder(enc_output)
+        Tx_sig = PowerNormalize(channel_enc_output)
+
+        if channel == 'AWGN':
+            Rx_sig = channels.AWGN(Tx_sig, n_var)
+        elif channel == 'Rayleigh':
+            Rx_sig = channels.Rayleigh(Tx_sig, n_var)
+        elif channel == 'Rician':
+            Rx_sig = channels.Rician(Tx_sig, n_var)
+        else:
+            raise ValueError("Please choose from AWGN, Rayleigh, and Rician")
+
+        channel_dec_output = model.channel_decoder(Rx_sig)
+        dec_output = model.decoder(trg_inp, channel_dec_output, combined_mask, src_mask)
+        pred = model.dense(dec_output)
+
+        ntokens = pred.size(-1)
+        loss = loss_function(pred.contiguous().view(-1, ntokens),
+                             trg_real.contiguous().view(-1),
+                             bert_pad_id, criterion)
+
+        if mi_net is not None:
+            mi_net.eval()
+            joint, marginal = sample_batch(Tx_sig, Rx_sig)
+            mi_lb, _, _ = mutual_information(joint, marginal, mi_net)
+            loss = loss + 0.0009 * (-mi_lb)
+
     else:
-        raise ValueError("Please choose from AWGN, Rayleigh, and Rician")
+        trg_inp = trg[:, :-1]
+        trg_real = trg[:, 1:]
 
-    channel_dec_output = model.channel_decoder(Rx_sig)
-    dec_output = model.decoder(trg_inp, channel_dec_output, look_ahead_mask, src_mask)
-    pred = model.dense(dec_output)
-    
-    # pred = model(src, trg_inp, src_mask, look_ahead_mask, n_var)
-    ntokens = pred.size(-1)
-    
-    #y_est = x +  torch.matmul(n, torch.inverse(H))
-    #loss1 = torch.mean(torch.pow((x_est - y_est.view(x_est.shape)), 2))
+        src_mask, look_ahead_mask = create_masks(src, trg_inp, pad)
 
-    loss = loss_function(pred.contiguous().view(-1, ntokens), 
-                         trg_real.contiguous().view(-1), 
-                         pad, criterion)
+        enc_output = model.encoder(src, src_mask)
+        channel_enc_output = model.channel_encoder(enc_output)
+        Tx_sig = PowerNormalize(channel_enc_output)
 
-    if mi_net is not None:
-        mi_net.eval()
-        joint, marginal = sample_batch(Tx_sig, Rx_sig)
-        mi_lb, _, _ = mutual_information(joint, marginal, mi_net)
-        loss_mine = -mi_lb
-        loss = loss + 0.0009 * loss_mine
-    # loss = loss_function(pred, trg_real, pad)
+        if channel == 'AWGN':
+            Rx_sig = channels.AWGN(Tx_sig, n_var)
+        elif channel == 'Rayleigh':
+            Rx_sig = channels.Rayleigh(Tx_sig, n_var)
+        elif channel == 'Rician':
+            Rx_sig = channels.Rician(Tx_sig, n_var)
+        else:
+            raise ValueError("Please choose from AWGN, Rayleigh, and Rician")
+
+        channel_dec_output = model.channel_decoder(Rx_sig)
+        dec_output = model.decoder(trg_inp, channel_dec_output, look_ahead_mask, src_mask)
+        pred = model.dense(dec_output)
+
+        ntokens = pred.size(-1)
+        loss = loss_function(pred.contiguous().view(-1, ntokens),
+                             trg_real.contiguous().view(-1),
+                             pad, criterion)
+
+        if mi_net is not None:
+            mi_net.eval()
+            joint, marginal = sample_batch(Tx_sig, Rx_sig)
+            mi_lb, _, _ = mutual_information(joint, marginal, mi_net)
+            loss = loss + 0.0009 * (-mi_lb)
 
     loss.backward()
     opt.step()
 
     return loss.item()
+
 
 
 def train_mi(model, mi_net, src, n_var, padding_idx, opt, channel):
@@ -307,46 +349,98 @@ def train_mi(model, mi_net, src, n_var, padding_idx, opt, channel):
 
 def val_step(model, src, trg, n_var, pad, criterion, channel):
     channels = Channels()
-    trg_inp = trg[:, :-1]
-    trg_real = trg[:, 1:]
 
-    src_mask, look_ahead_mask = create_masks(src, trg_inp, pad)
+    if model.use_bert_encoder:
+        src_input_ids = src['input_ids'].to(device)
+        src_attn_mask = src['attention_mask'].to(device)
+        trg_input_ids = trg['input_ids'].to(device)
 
-    enc_output = model.encoder(src, src_mask)
-    channel_enc_output = model.channel_encoder(enc_output)
-    Tx_sig = PowerNormalize(channel_enc_output)
+        bert_pad_id = 0
+        trg_inp = trg_input_ids[:, :-1]
+        trg_real = trg_input_ids[:, 1:]
 
-    if channel == 'AWGN':
-        Rx_sig = channels.AWGN(Tx_sig, n_var)
-    elif channel == 'Rayleigh':
-        Rx_sig = channels.Rayleigh(Tx_sig, n_var)
-    elif channel == 'Rician':
-        Rx_sig = channels.Rician(Tx_sig, n_var)
+        trg_mask = (trg_inp == bert_pad_id).unsqueeze(-2).type(torch.FloatTensor).to(device)
+        look_ahead_mask = subsequent_mask(trg_inp.size(-1)).type_as(trg_mask.data)
+        combined_mask = torch.max(trg_mask, look_ahead_mask)
+        src_mask = (1 - src_attn_mask).unsqueeze(-2).type(torch.FloatTensor).to(device)
+
+        enc_output = model.encoder(src_input_ids, attention_mask=src_attn_mask)
+        channel_enc_output = model.channel_encoder(enc_output)
+        Tx_sig = PowerNormalize(channel_enc_output)
+
+        if channel == 'AWGN':
+            Rx_sig = channels.AWGN(Tx_sig, n_var)
+        elif channel == 'Rayleigh':
+            Rx_sig = channels.Rayleigh(Tx_sig, n_var)
+        elif channel == 'Rician':
+            Rx_sig = channels.Rician(Tx_sig, n_var)
+        else:
+            raise ValueError("Please choose from AWGN, Rayleigh, and Rician")
+
+        channel_dec_output = model.channel_decoder(Rx_sig)
+        dec_output = model.decoder(trg_inp, channel_dec_output, combined_mask, src_mask)
+        pred = model.dense(dec_output)
+
+        ntokens = pred.size(-1)
+        loss = loss_function(pred.contiguous().view(-1, ntokens),
+                             trg_real.contiguous().view(-1),
+                             bert_pad_id, criterion)
     else:
-        raise ValueError("Please choose from AWGN, Rayleigh, and Rician")
+        trg_inp = trg[:, :-1]
+        trg_real = trg[:, 1:]
 
-    channel_dec_output = model.channel_decoder(Rx_sig)
-    dec_output = model.decoder(trg_inp, channel_dec_output, look_ahead_mask, src_mask)
-    pred = model.dense(dec_output)
+        src_mask, look_ahead_mask = create_masks(src, trg_inp, pad)
 
-    # pred = model(src, trg_inp, src_mask, look_ahead_mask, n_var)
-    ntokens = pred.size(-1)
-    loss = loss_function(pred.contiguous().view(-1, ntokens), 
-                         trg_real.contiguous().view(-1), 
-                         pad, criterion)
-    # loss = loss_function(pred, trg_real, pad)
-    
+        enc_output = model.encoder(src, src_mask)
+        channel_enc_output = model.channel_encoder(enc_output)
+        Tx_sig = PowerNormalize(channel_enc_output)
+
+        if channel == 'AWGN':
+            Rx_sig = channels.AWGN(Tx_sig, n_var)
+        elif channel == 'Rayleigh':
+            Rx_sig = channels.Rayleigh(Tx_sig, n_var)
+        elif channel == 'Rician':
+            Rx_sig = channels.Rician(Tx_sig, n_var)
+        else:
+            raise ValueError("Please choose from AWGN, Rayleigh, and Rician")
+
+        channel_dec_output = model.channel_decoder(Rx_sig)
+        dec_output = model.decoder(trg_inp, channel_dec_output, look_ahead_mask, src_mask)
+        pred = model.dense(dec_output)
+
+        ntokens = pred.size(-1)
+        loss = loss_function(pred.contiguous().view(-1, ntokens),
+                             trg_real.contiguous().view(-1),
+                             pad, criterion)
+
     return loss.item()
-    
-def greedy_decode(model, src, n_var, max_len, padding_idx, start_symbol, channel):
-    """ 
-    这里采用贪婪解码器，如果需要更好的性能情况下，可以使用beam search decode
-    """
-    # create src_mask
-    channels = Channels()
-    src_mask = (src == padding_idx).unsqueeze(-2).type(torch.FloatTensor).to(device) #[batch, 1, seq_len]
 
-    enc_output = model.encoder(src, src_mask)
+    
+def greedy_decode(model, src, n_var, max_len, padding_idx, start_symbol, channel,
+                  attention_mask=None):
+    """Greedy (argmax) decoder.
+
+    For the BERT encoder path, ``src`` contains BERT input_ids and
+    ``attention_mask`` must be provided.  ``padding_idx`` and
+    ``start_symbol`` should use BERT token IDs in that case
+    (pad=0, start=[CLS]=101).
+
+    For the custom encoder path the original behaviour is preserved.
+    """
+    channels = Channels()
+
+    if model.use_bert_encoder:
+        src_input_ids = src.to(device)
+        src_attn_mask = attention_mask.to(device) if attention_mask is not None else None
+        src_mask = None  # not needed for cross-attention mask derivation here
+        if src_attn_mask is not None:
+            src_mask = (1 - src_attn_mask).unsqueeze(-2).type(torch.FloatTensor).to(device)
+
+        enc_output = model.encoder(src_input_ids, attention_mask=src_attn_mask)
+    else:
+        src_mask = (src == padding_idx).unsqueeze(-2).type(torch.FloatTensor).to(device)
+        enc_output = model.encoder(src, src_mask)
+
     channel_enc_output = model.channel_encoder(enc_output)
     Tx_sig = PowerNormalize(channel_enc_output)
 
@@ -358,37 +452,22 @@ def greedy_decode(model, src, n_var, max_len, padding_idx, start_symbol, channel
         Rx_sig = channels.Rician(Tx_sig, n_var)
     else:
         raise ValueError("Please choose from AWGN, Rayleigh, and Rician")
-            
-    #channel_enc_output = model.blind_csi(channel_enc_output)
-          
+
     memory = model.channel_decoder(Rx_sig)
-    
+
     outputs = torch.ones(src.size(0), 1).fill_(start_symbol).type_as(src.data)
 
     for i in range(max_len - 1):
-        # create the decode mask
-        trg_mask = (outputs == padding_idx).unsqueeze(-2).type(torch.FloatTensor) #[batch, 1, seq_len]
+        trg_mask = (outputs == padding_idx).unsqueeze(-2).type(torch.FloatTensor)
         look_ahead_mask = subsequent_mask(outputs.size(1)).type(torch.FloatTensor)
-#        print(look_ahead_mask)
         combined_mask = torch.max(trg_mask, look_ahead_mask)
         combined_mask = combined_mask.to(device)
 
-        # decode the received signal
-        dec_output = model.decoder(outputs, memory, combined_mask, None)
+        dec_output = model.decoder(outputs, memory, combined_mask, src_mask)
         pred = model.dense(dec_output)
-        
-        # predict the word
-        prob = pred[: ,-1:, :]  # (batch_size, 1, vocab_size)
-        #prob = prob.squeeze()
 
-        # return the max-prob index
-        _, next_word = torch.max(prob, dim = -1)
-        #next_word = next_word.unsqueeze(1)
-        
-        #next_word = next_word.data[0]
+        prob = pred[:, -1:, :]  # (batch_size, 1, vocab_size)
+        _, next_word = torch.max(prob, dim=-1)
         outputs = torch.cat([outputs, next_word], dim=1)
 
     return outputs
-
-
-

@@ -213,6 +213,42 @@ class Encoder(nn.Module):
             x = enc_layer(x, src_mask)
         
         return x
+
+
+class BertSemanticEncoder(nn.Module):
+    """Pretrained multilingual BERT encoder with a learned projection to d_model.
+
+    Args:
+        bert_model_name: HuggingFace model identifier
+            (e.g. 'bert-base-multilingual-cased').
+        d_model: Target hidden dimension for the downstream channel encoder.
+        freeze: If True, all BERT parameters are frozen (no gradients).
+            Only the projection layer is trained.
+    """
+    def __init__(self, bert_model_name: str, d_model: int, freeze: bool = True):
+        super(BertSemanticEncoder, self).__init__()
+        from transformers import BertModel
+        self.bert = BertModel.from_pretrained(bert_model_name)
+        if freeze:
+            for param in self.bert.parameters():
+                param.requires_grad = False
+        # Project BERT hidden size (768) down to d_model
+        self.proj = nn.Linear(self.bert.config.hidden_size, d_model)
+
+    def forward(self, input_ids, attention_mask=None):
+        """Forward pass.
+
+        Args:
+            input_ids: LongTensor [batch, seq_len] — BERT token IDs.
+            attention_mask: FloatTensor [batch, seq_len] — BERT convention
+                (1 = real token, 0 = padding). If None, all tokens are attended.
+
+        Returns:
+            Tensor [batch, seq_len, d_model]
+        """
+        outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+        hidden = outputs.last_hidden_state  # [batch, seq_len, bert_hidden]
+        return self.proj(hidden)            # [batch, seq_len, d_model]
         
 
 
@@ -261,25 +297,56 @@ class ChannelDecoder(nn.Module):
         return output
         
 class DeepSC(nn.Module):
-    def __init__(self, num_layers, src_vocab_size, trg_vocab_size, src_max_len, 
-                 trg_max_len, d_model, num_heads, dff, dropout = 0.1):
+    def __init__(self, num_layers, src_vocab_size, trg_vocab_size, src_max_len,
+                 trg_max_len, d_model, num_heads, dff, dropout=0.1,
+                 use_bert_encoder=False,
+                 bert_model_name='bert-base-multilingual-cased',
+                 freeze_bert=True):
+        """DeepSC transceiver.
+
+        When use_bert_encoder=True:
+          - src_vocab_size is ignored (BERT has its own embeddings).
+          - trg_vocab_size should be the BERT tokenizer vocab size so that
+            the decoder and output dense layer use the BERT vocabulary.
+        """
         super(DeepSC, self).__init__()
-        
-        self.encoder = Encoder(num_layers, src_vocab_size, src_max_len, 
-                               d_model, num_heads, dff, dropout)
-        
-        self.channel_encoder = nn.Sequential(nn.Linear(d_model, 256), 
-                                             #nn.ELU(inplace=True),
-                                             nn.ReLU(inplace=True),
-                                             nn.Linear(256, 16))
 
+        self.use_bert_encoder = use_bert_encoder
 
+        if use_bert_encoder:
+            self.encoder = BertSemanticEncoder(
+                bert_model_name, d_model, freeze=freeze_bert
+            )
+        else:
+            self.encoder = Encoder(
+                num_layers, src_vocab_size, src_max_len, d_model, num_heads, dff, dropout
+            )
+
+        self.channel_encoder = nn.Sequential(
+            nn.Linear(d_model, 256),
+            nn.ReLU(inplace=True),
+            #increase bandwidth temp from 16->32
+            nn.Linear(256, 16)
+        )
+        #change the receiver part too
         self.channel_decoder = ChannelDecoder(16, d_model, 512)
-        
-        self.decoder = Decoder(num_layers, trg_vocab_size, trg_max_len, 
-                               d_model, num_heads, dff, dropout)
-        
+
+        self.decoder = Decoder(
+            num_layers, trg_vocab_size, trg_max_len, d_model, num_heads, dff, dropout
+        )
+
         self.dense = nn.Linear(d_model, trg_vocab_size)
+
+    def encode(self, src, src_mask=None, attention_mask=None):
+        """Unified encode interface.
+
+        For the BERT encoder path, pass attention_mask (BERT convention).
+        For the custom encoder path, pass src_mask (padding mask convention).
+        """
+        if self.use_bert_encoder:
+            return self.encoder(src, attention_mask=attention_mask)
+        else:
+            return self.encoder(src, src_mask)
 
 
 

@@ -10,17 +10,13 @@ import json
 import torch
 import argparse
 import numpy as np
-from dataset import EurDataset, collate_data
+from functools import partial
+from dataset import EurDataset, collate_data, collate_data_bert
 from models.transceiver import DeepSC
 from torch.utils.data import DataLoader
 from utils import BleuScore, SNR_to_noise, greedy_decode, SeqtoText
 from tqdm import tqdm
-from sklearn.preprocessing import normalize
-# from bert4keras.backend import keras
-# from bert4keras.models import build_bert_model
-# from bert4keras.tokenizers import Tokenizer
-from w3lib.html import remove_tags
-
+import random
 parser = argparse.ArgumentParser()
 parser.add_argument('--data-dir', default='txt/train_data.pkl', type=str)
 parser.add_argument('--vocab-file', default='txt/vocab.json', type=str)
@@ -28,84 +24,120 @@ parser.add_argument('--checkpoint-path', default='checkpoints/deepsc-Rayleigh', 
 parser.add_argument('--channel', default='Rayleigh', type=str)
 parser.add_argument('--MAX-LENGTH', default=30, type=int)
 parser.add_argument('--MIN-LENGTH', default=4, type=int)
-parser.add_argument('--d-model', default=128, type = int)
+parser.add_argument('--d-model', default=128, type=int)
 parser.add_argument('--dff', default=512, type=int)
 parser.add_argument('--num-layers', default=4, type=int)
 parser.add_argument('--num-heads', default=8, type=int)
 parser.add_argument('--batch-size', default=64, type=int)
-parser.add_argument('--epochs', default=2, type = int)
-parser.add_argument('--bert-config-path', default='bert/cased_L-12_H-768_A-12/bert_config.json', type = str)
-parser.add_argument('--bert-checkpoint-path', default='bert/cased_L-12_H-768_A-12/bert_model.ckpt', type = str)
-parser.add_argument('--bert-dict-path', default='bert/cased_L-12_H-768_A-12/vocab.txt', type = str)
+parser.add_argument('--epochs', default=2, type=int)
+# BERT encoder options
+parser.add_argument('--use-bert-encoder', action='store_true',
+                    help='Use the BERT encoder variant of DeepSC')
+parser.add_argument('--bert-model-name', default='bert-base-multilingual-cased', type=str,
+                    help='HuggingFace model identifier for the BERT encoder')
+# Semantic similarity options
+parser.add_argument('--bert-score', action='store_true',
+                    help='Compute BERTScore semantic similarity in addition to BLEU')
+parser.add_argument('--bert-score-model', default='bert-base-multilingual-cased', type=str,
+                    help='Model used by BERTScore for semantic similarity scoring. '
+                         'Can differ from --bert-model-name (the encoder model). '
+                         'E.g. roberta-large for higher quality scores.')
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
-# using pre-trained model to compute the sentence similarity
-# class Similarity():
-#     def __init__(self, config_path, checkpoint_path, dict_path):
-#         self.model1 = build_bert_model(config_path, checkpoint_path, with_pool=True)
-#         self.model = keras.Model(inputs=self.model1.input,
-#                                  outputs=self.model1.get_layer('Encoder-11-FeedForward-Norm').output)
-#         # build tokenizer
-#         self.tokenizer = Tokenizer(dict_path, do_lower_case=True)
-#
-#     def compute_similarity(self, real, predicted):
-#         token_ids1, segment_ids1 = [], []
-#         token_ids2, segment_ids2 = [], []
-#         score = []
-#
-#         for (sent1, sent2) in zip(real, predicted):
-#             sent1 = remove_tags(sent1)
-#             sent2 = remove_tags(sent2)
-#
-#             ids1, sids1 = self.tokenizer.encode(sent1)
-#             ids2, sids2 = self.tokenizer.encode(sent2)
-#
-#             token_ids1.append(ids1)
-#             token_ids2.append(ids2)
-#             segment_ids1.append(sids1)
-#             segment_ids2.append(sids2)
-#
-#         token_ids1 = keras.preprocessing.sequence.pad_sequences(token_ids1, maxlen=32, padding='post')
-#         token_ids2 = keras.preprocessing.sequence.pad_sequences(token_ids2, maxlen=32, padding='post')
-#
-#         segment_ids1 = keras.preprocessing.sequence.pad_sequences(segment_ids1, maxlen=32, padding='post')
-#         segment_ids2 = keras.preprocessing.sequence.pad_sequences(segment_ids2, maxlen=32, padding='post')
-#
-#         vector1 = self.model.predict([token_ids1, segment_ids1])
-#         vector2 = self.model.predict([token_ids2, segment_ids2])
-#
-#         vector1 = np.sum(vector1, axis=1)
-#         vector2 = np.sum(vector2, axis=1)
-#
-#         vector1 = normalize(vector1, axis=0, norm='max')
-#         vector2 = normalize(vector2, axis=0, norm='max')
-#
-#         dot = np.diag(np.matmul(vector1, vector2.T))  # a*b
-#         a = np.diag(np.matmul(vector1, vector1.T))  # a*a
-#         b = np.diag(np.matmul(vector2, vector2.T))
-#
-#         a = np.sqrt(a)
-#         b = np.sqrt(b)
-#
-#         output = dot / (a * b)
-#         score = output.tolist()
-#
-#         return score
+class BertScoreEvaluator:
+    """Thin wrapper around the bert-score library.
+
+    Lazily loads the scoring model on first call and caches it.  All scoring
+    runs on the same device as the rest of the pipeline.
+
+    Args:
+        model_type: HuggingFace model identifier used for embedding extraction.
+            Defaults to ``'bert-base-multilingual-cased'``.
+            Use ``'roberta-large'`` for higher quality English-only scores.
+        lang: Language hint passed to bert-score (``'en'``, ``'de'``, etc.).
+            Set to ``'en'`` for Europarl English data.
+        batch_size: How many sentence pairs to score at once.
+    """
+
+    def __init__(self, model_type: str = 'bert-base-multilingual-cased',
+                 lang: str = 'en', batch_size: int = 64):
+        self.model_type = model_type
+        self.lang = lang
+        self.batch_size = batch_size
+        self._scorer = None  # lazy init
+
+    def _get_scorer(self):
+        if self._scorer is None:
+            try:
+                from bert_score import BERTScorer
+            except ImportError:
+                raise ImportError(
+                    'bert-score is not installed. '
+                    'Run: uv pip install bert-score'
+                )
+            use_gpu = torch.cuda.is_available()
+            self._scorer = BERTScorer(
+                model_type=self.model_type,
+                lang=self.lang,
+                device='cuda' if use_gpu else 'cpu',
+                batch_size=self.batch_size,
+            )
+        return self._scorer
+
+    def score(self, predictions: list, references: list) -> dict:
+        """Compute BERTScore for a list of prediction/reference pairs.
+
+        Args:
+            predictions: List of predicted strings.
+            references:  List of reference strings (same length).
+
+        Returns:
+            dict with keys ``'precision'``, ``'recall'``, ``'f1'``,
+            each a float (mean across the batch).
+        """
+        scorer = self._get_scorer()
+        P, R, F1 = scorer.score(predictions, references)
+        return {
+            'precision': P.mean().item(),
+            'recall':    R.mean().item(),
+            'f1':        F1.mean().item(),
+        }
 
 
-def performance(args, SNR, net):
-    # similarity = Similarity(args.bert_config_path, args.bert_checkpoint_path, args.bert_dict_path)
-    bleu_score_1gram = BleuScore(1, 0, 0, 0)
+def performance(args, SNR, net, collate_fn, decode_fn, bert_scorer=None):
+    """Evaluate net over a range of SNR values.
+
+    Args:
+        args: parsed arguments.
+        SNR: list of SNR values (dB) to evaluate at.
+        net: the DeepSC model.
+        collate_fn: DataLoader collate function (standard or BERT).
+        decode_fn: callable(net, sents, noise_std) -> (predicted, references).
+        bert_scorer: optional ``BertScoreEvaluator`` instance. When provided,
+            BERTScore F1/P/R are computed alongside BLEU for each SNR point.
+
+    Returns:
+        bleu_scores: dict with keys 'bleu1'..'bleu4', each an np.ndarray of
+            shape [len(SNR)] containing the mean n-gram BLEU for that order.
+        bert_scores: dict with keys 'f1', 'precision', 'recall', each
+            np.ndarray of shape [len(SNR)].  Empty dict if bert_scorer is None.
+    """
+    bleu_scorers = {
+        'bleu1': BleuScore(1, 0, 0, 0),
+        'bleu2': BleuScore(0, 1, 0, 0),
+        'bleu3': BleuScore(0, 0, 1, 0),
+        'bleu4': BleuScore(0, 0, 0, 1),
+    }
 
     test_eur = EurDataset('test')
     test_iterator = DataLoader(test_eur, batch_size=args.batch_size, num_workers=0,
-                               pin_memory=True, collate_fn=collate_data)
+                               pin_memory=True, collate_fn=collate_fn)
 
-    StoT = SeqtoText(token_to_idx, end_idx)
-    score = []
-    score2 = []
+    all_bleu = {k: [] for k in bleu_scorers}
+    all_bert_f1, all_bert_p, all_bert_r = [], [], []
+
     net.eval()
     with torch.no_grad():
         for epoch in range(args.epochs):
@@ -118,76 +150,229 @@ def performance(args, SNR, net):
                 noise_std = SNR_to_noise(snr)
 
                 for sents in test_iterator:
-
-                    sents = sents.to(device)
-                    # src = batch.src.transpose(0, 1)[:1]
-                    target = sents
-
-                    out = greedy_decode(net, sents, noise_std, args.MAX_LENGTH, pad_idx,
-                                        start_idx, args.channel)
-
-                    sentences = out.cpu().numpy().tolist()
-                    result_string = list(map(StoT.sequence_to_text, sentences))
-                    word = word + result_string
-
-                    target_sent = target.cpu().numpy().tolist()
-                    result_string = list(map(StoT.sequence_to_text, target_sent))
-                    target_word = target_word + result_string
+                    predicted, references = decode_fn(net, sents, noise_std)
+                    word += predicted
+                    target_word += references
 
                 Tx_word.append(word)
                 Rx_word.append(target_word)
 
-            bleu_score = []
-            sim_score = []
-            for sent1, sent2 in zip(Tx_word, Rx_word):
-                # 1-gram
-                bleu_score.append(bleu_score_1gram.compute_blue_score(sent1, sent2)) # 7*num_sent
-                # sim_score.append(similarity.compute_similarity(sent1, sent2)) # 7*num_sent
-            bleu_score = np.array(bleu_score)
-            bleu_score = np.mean(bleu_score, axis=1)
-            score.append(bleu_score)
+            bleu_epoch = {k: [] for k in bleu_scorers}
+            bert_f1_epoch, bert_p_epoch, bert_r_epoch = [], [], []
 
-            # sim_score = np.array(sim_score)
-            # sim_score = np.mean(sim_score, axis=1)
-            # score2.append(sim_score)
+            for snr_idx, (sent1, sent2) in enumerate(zip(Tx_word, Rx_word)):
+                print(f"\n" + "="*80)
+                print(f" SNR: {SNR[snr_idx]} dB | Sample Comparisons")
+                print(f"="*80)
+                for pred, ref in zip(sent1[:5], sent2[:5]):
+                    print(f"Predicted: {pred}")
+                    print(f"Actual   : {ref}")
+                    print("-"*40)
 
-    score1 = np.mean(np.array(score), axis=0)
-    # score2 = np.mean(np.array(score2), axis=0)
+                # BLEU-1 through BLEU-4
+                for key, scorer in bleu_scorers.items():
+                    bleu_epoch[key].append(scorer.compute_blue_score(sent1, sent2))
 
-    return score1#, score2
+                # BERTScore (optional)
+                if bert_scorer is not None:
+                    bs = bert_scorer.score(sent1, sent2)
+                    bert_f1_epoch.append(bs['f1'])
+                    bert_p_epoch.append(bs['precision'])
+                    bert_r_epoch.append(bs['recall'])
+                    print(f"BERTScore  F1={bs['f1']:.4f}  P={bs['precision']:.4f}  R={bs['recall']:.4f}")
+
+            for key in bleu_scorers:
+                arr = np.array(bleu_epoch[key])          # shape [len(SNR), batch]
+                all_bleu[key].append(np.mean(arr, axis=1))  # shape [len(SNR)]
+
+            if bert_scorer is not None:
+                all_bert_f1.append(bert_f1_epoch)
+                all_bert_p.append(bert_p_epoch)
+                all_bert_r.append(bert_r_epoch)
+
+    bleu_scores = {k: np.mean(np.array(all_bleu[k]), axis=0) for k in bleu_scorers}
+
+    bert_scores = {}
+    if bert_scorer is not None:
+        bert_scores['f1']        = np.mean(np.array(all_bert_f1), axis=0)
+        bert_scores['precision'] = np.mean(np.array(all_bert_p),  axis=0)
+        bert_scores['recall']    = np.mean(np.array(all_bert_r),  axis=0)
+
+    return bleu_scores, bert_scores
+
+
+
+# ---------------------------------------------------------------------------
+# Decode helpers — one per encoder type
+# ---------------------------------------------------------------------------
+
+def _decode_custom(net, sents, noise_std,
+                   StoT, pad_idx, start_idx, channel, max_length):
+    """Decode a batch using the custom-vocab encoder."""
+    sents = sents.to(device)
+    out = greedy_decode(net, sents, noise_std, max_length, pad_idx,
+                        start_idx, channel)
+    sentences = out.cpu().numpy().tolist()
+    predicted = list(map(StoT.sequence_to_text, sentences))
+    target_sent = sents.cpu().numpy().tolist()
+    references = list(map(StoT.sequence_to_text, target_sent))
+    return predicted, references
+
+
+def _decode_bert(net, sents, noise_std,
+                 bert_tokenizer, pad_idx, start_idx, channel, max_length):
+    """Decode a batch using the BERT encoder."""
+    input_ids = sents['input_ids'].to(device)
+    attention_mask = sents['attention_mask'].to(device)
+
+    out = greedy_decode(net, input_ids, noise_std, max_length, pad_idx,
+                        start_idx, channel, attention_mask=attention_mask)
+
+    # Decode BERT token IDs → strings (skip special tokens)
+    predicted = bert_tokenizer.batch_decode(out.cpu().tolist(),
+                                            skip_special_tokens=True)
+    references = bert_tokenizer.batch_decode(input_ids.cpu().tolist(),
+                                             skip_special_tokens=True)
+    return predicted, references
+def setup_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    SNR = [0,3,6,9,12,15,18]
+    setup_seed(10)
+    SNR = [0, 3, 6, 9, 12, 15, 18]
 
-    args.vocab_file = args.vocab_file
-    vocab = json.load(open(args.vocab_file, 'rb'))
-    token_to_idx = vocab['token_to_idx']
-    idx_to_token = dict(zip(token_to_idx.values(), token_to_idx.keys()))
-    num_vocab = len(token_to_idx)
-    pad_idx = token_to_idx["<PAD>"]
-    start_idx = token_to_idx["<START>"]
-    end_idx = token_to_idx["<END>"]
+    if args.use_bert_encoder:
+        from transformers import BertTokenizerFast
+        print(f'Loading BERT tokenizer: {args.bert_model_name}')
+        bert_tokenizer = BertTokenizerFast.from_pretrained(args.bert_model_name)
+        bert_vocab_size = bert_tokenizer.vocab_size
 
-    """ define optimizer and loss function """
-    deepsc = DeepSC(args.num_layers, num_vocab, num_vocab,
+        pad_idx = bert_tokenizer.pad_token_id      # 0
+        start_idx = bert_tokenizer.cls_token_id    # 101
+        end_idx = bert_tokenizer.sep_token_id      # 102
+
+        # Custom vocab still needed to reverse the existing pkl → raw text
+        vocab = json.load(open(args.vocab_file, 'rb'))
+        token_to_idx = vocab['token_to_idx']
+        idx_to_token = dict(zip(token_to_idx.values(), token_to_idx.keys()))
+        custom_end_idx = token_to_idx['<END>']
+        custom_pad_idx = token_to_idx['<PAD>']
+
+        collate_fn = partial(
+            collate_data_bert,
+            bert_tokenizer=bert_tokenizer,
+            idx_to_token=idx_to_token,
+            end_idx=custom_end_idx,
+            pad_idx=custom_pad_idx,
+            max_length=args.MAX_LENGTH,
+        )
+
+        decode_fn = partial(
+            _decode_bert,
+            bert_tokenizer=bert_tokenizer,
+            pad_idx=pad_idx,
+            start_idx=start_idx,
+            channel=args.channel,
+            max_length=args.MAX_LENGTH,
+        )
+
+        deepsc = DeepSC(
+            args.num_layers,
+            src_vocab_size=bert_vocab_size,
+            trg_vocab_size=bert_vocab_size,
+            src_max_len=args.MAX_LENGTH,
+            trg_max_len=args.MAX_LENGTH,
+            d_model=args.d_model,
+            num_heads=args.num_heads,
+            dff=args.dff,
+            dropout=0.1,
+            use_bert_encoder=True,
+            bert_model_name=args.bert_model_name,
+            freeze_bert=True,  # always frozen at eval time
+        ).to(device)
+
+    else:
+        vocab = json.load(open(args.vocab_file, 'rb'))
+        token_to_idx = vocab['token_to_idx']
+        idx_to_token = dict(zip(token_to_idx.values(), token_to_idx.keys()))
+        num_vocab = len(token_to_idx)
+        pad_idx = token_to_idx['<PAD>']
+        start_idx = token_to_idx['<START>']
+        end_idx = token_to_idx['<END>']
+
+        StoT = SeqtoText(token_to_idx, end_idx)
+        collate_fn = collate_data
+
+        decode_fn = partial(
+            _decode_custom,
+            StoT=StoT,
+            pad_idx=pad_idx,
+            start_idx=start_idx,
+            channel=args.channel,
+            max_length=args.MAX_LENGTH,
+        )
+
+        deepsc = DeepSC(args.num_layers, num_vocab, num_vocab,
                         num_vocab, num_vocab, args.d_model, args.num_heads,
                         args.dff, 0.1).to(device)
 
+    # Load latest checkpoint
     model_paths = []
     for fn in os.listdir(args.checkpoint_path):
-        if not fn.endswith('.pth'): continue
-        idx = int(os.path.splitext(fn)[0].split('_')[-1])  # read the idx of image
+        if not fn.endswith('.pth'):
+            continue
+        idx = int(os.path.splitext(fn)[0].split('_')[-1])
         model_paths.append((os.path.join(args.checkpoint_path, fn), idx))
 
-    model_paths.sort(key=lambda x: x[1])  # sort the image by the idx
-
+    model_paths.sort(key=lambda x: x[1])
     model_path, _ = model_paths[-1]
-    checkpoint = torch.load(model_path)
+    checkpoint = torch.load(model_path, map_location=device)
     deepsc.load_state_dict(checkpoint)
-    print('model load!')
+    print('Model loaded from:', model_path)
 
-    bleu_score = performance(args, SNR, deepsc)
-    print(bleu_score)
+    # Optionally build BERTScore evaluator
+    bert_scorer = None
+    if args.bert_score:
+        print(f'Initialising BERTScore evaluator (model: {args.bert_score_model})...')
+        bert_scorer = BertScoreEvaluator(
+            model_type=args.bert_score_model,
+            lang='en',
+            batch_size=args.batch_size,
+        )
 
-    #similarity.compute_similarity(sent1, real)
+    bleu_scores, bert_scores = performance(
+        args, SNR, deepsc, collate_fn, decode_fn, bert_scorer=bert_scorer
+    )
+
+    # Dynamic column width based on optional BERT columns
+    bert_cols = f' | {"BERT-F1":>8} | {"BERT-P":>8} | {"BERT-R":>8}' if bert_scores else ''
+    sep_width = 10 + 4 * 11 + (3 * 11 if bert_scores else 0)  # approx separator width
+
+    print('\n' + '='*sep_width)
+    print(' Results')
+    print('='*sep_width)
+    print(f'{"SNR (dB)":>10} | {"BLEU-1":>8} | {"BLEU-2":>8} | {"BLEU-3":>8} | {"BLEU-4":>8}', end='')
+    if bert_scores:
+        print(f' | {"BERT-F1":>8} | {"BERT-P":>8} | {"BERT-R":>8}', end='')
+    print()
+    print('-'*sep_width)
+    for i, snr in enumerate(SNR):
+        row = (f'{snr:>10}'
+               f' | {bleu_scores["bleu1"][i]:>8.4f}'
+               f' | {bleu_scores["bleu2"][i]:>8.4f}'
+               f' | {bleu_scores["bleu3"][i]:>8.4f}'
+               f' | {bleu_scores["bleu4"][i]:>8.4f}')
+        if bert_scores:
+            row += (f' | {bert_scores["f1"][i]:>8.4f}'
+                    f' | {bert_scores["precision"][i]:>8.4f}'
+                    f' | {bert_scores["recall"][i]:>8.4f}')
+        print(row)
