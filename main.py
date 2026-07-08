@@ -73,14 +73,18 @@ def validate(epoch, args, net, collate_fn):
     total = 0
     with torch.no_grad():
         for sents in pbar:
+            snr_db = np.random.uniform(args.snr_min, args.snr_max)
+            noise_std = SNR_to_noise(snr_db)
+            #pick random channel from training
+            channel = np.random.choice(args.train_channels)
             if args.use_bert_encoder:
                 # sents is a dict; src == trg for auto-encoding
-                loss = val_step(net, sents, sents, 0.1, pad_idx,
-                                criterion, args.channel)
+                loss = val_step(net, sents, sents, noise_std, pad_idx,
+                                criterion, channel)
             else:
                 sents = sents.to(device)
                 loss = val_step(net, sents, sents, 0.1, pad_idx,
-                                criterion, args.channel)
+                                criterion, channel)
 
             total += loss
             pbar.set_description(
