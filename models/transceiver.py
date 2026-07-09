@@ -22,6 +22,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Function
 import math
+from models.diffusion_decoder import DiffusionDecoder
 
 
 class PositionalEncoding(nn.Module):
@@ -301,17 +302,29 @@ class DeepSC(nn.Module):
                  trg_max_len, d_model, num_heads, dff, dropout=0.1,
                  use_bert_encoder=False,
                  bert_model_name='bert-base-multilingual-cased',
-                 freeze_bert=True):
+                 freeze_bert=True,
+                 use_diffusion_decoder=False,
+                 diff_steps=100,
+                 diff_sampling_steps=50):
         """DeepSC transceiver.
 
         When use_bert_encoder=True:
           - src_vocab_size is ignored (BERT has its own embeddings).
           - trg_vocab_size should be the BERT tokenizer vocab size so that
             the decoder and output dense layer use the BERT vocabulary.
+
+        When use_diffusion_decoder=True:
+          - The auto-regressive Transformer decoder is replaced by a
+            DDPM-trained / DDIM-sampled diffusion decoder.
+          - diff_steps: total forward-process timesteps T (default 100).
+          - diff_sampling_steps: DDIM reverse steps at inference (default 50).
+          - The Transformer decoder is NOT instantiated, keeping the two
+            paths fully independent (backward compatible checkpoints).
         """
         super(DeepSC, self).__init__()
 
         self.use_bert_encoder = use_bert_encoder
+        self.use_diffusion_decoder = use_diffusion_decoder
 
         if use_bert_encoder:
             self.encoder = BertSemanticEncoder(
@@ -331,9 +344,24 @@ class DeepSC(nn.Module):
         #change the receiver part too
         self.channel_decoder = ChannelDecoder(16, d_model, 512)
 
-        self.decoder = Decoder(
-            num_layers, trg_vocab_size, trg_max_len, d_model, num_heads, dff, dropout
-        )
+        if use_diffusion_decoder:
+            # Diffusion-based decoder: DDPM training, DDIM inference
+            self.diffusion_decoder = DiffusionDecoder(
+                trg_vocab_size=trg_vocab_size,
+                max_len=trg_max_len,
+                d_model=d_model,
+                num_heads=num_heads,
+                dff=dff,
+                num_layers=num_layers,
+                diff_steps=diff_steps,
+                sampling_steps=diff_sampling_steps,
+                dropout=dropout,
+            )
+        else:
+            # Original auto-regressive Transformer decoder (default)
+            self.decoder = Decoder(
+                num_layers, trg_vocab_size, trg_max_len, d_model, num_heads, dff, dropout
+            )
 
         self.dense = nn.Linear(d_model, trg_vocab_size)
 

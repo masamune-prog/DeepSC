@@ -53,6 +53,12 @@ parser.add_argument('--train-channels', nargs='+',
                          'E.g. --train-channels AWGN Rayleigh')
 parser.add_argument('--log-file', default='training_log.csv', type=str,
                     help='CSV file to write per-epoch train/val loss for plotting')
+parser.add_argument('--use-diffusion-decoder', action='store_true',
+                    help='Replace the Transformer decoder with a diffusion (DDPM/DDIM) decoder')
+parser.add_argument('--diff-steps', default=100, type=int,
+                    help='Total DDPM forward-process timesteps T (diffusion decoder only)')
+parser.add_argument('--diff-sampling-steps', default=50, type=int,
+                    help='Number of DDIM reverse steps at inference (diffusion decoder only)')
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -201,6 +207,9 @@ if __name__ == '__main__':
             use_bert_encoder=True,
             bert_model_name=args.bert_model_name,
             freeze_bert=not args.finetune_bert,
+            use_diffusion_decoder=args.use_diffusion_decoder,
+            diff_steps=args.diff_steps,
+            diff_sampling_steps=args.diff_sampling_steps,
         ).to(device)
 
     else:
@@ -216,7 +225,10 @@ if __name__ == '__main__':
 
         deepsc = DeepSC(args.num_layers, num_vocab, num_vocab,
                         num_vocab, num_vocab, args.d_model, args.num_heads,
-                        args.dff, 0.1).to(device)
+                        args.dff, 0.1,
+                        use_diffusion_decoder=args.use_diffusion_decoder,
+                        diff_steps=args.diff_steps,
+                        diff_sampling_steps=args.diff_sampling_steps).to(device)
 
     mi_net = Mine().to(device)
     criterion = nn.CrossEntropyLoss(reduction='none')
@@ -258,6 +270,15 @@ if __name__ == '__main__':
             epochs_no_improve = 0
             if not os.path.exists(args.checkpoint_path):
                 os.makedirs(args.checkpoint_path)
+                # Persist architecture config so performance.py can reload correctly
+                import json as _json
+                _cfg = {
+                    'use_diffusion_decoder': args.use_diffusion_decoder,
+                    'diff_steps':            args.diff_steps,
+                    'diff_sampling_steps':   args.diff_sampling_steps,
+                }
+                with open(os.path.join(args.checkpoint_path, 'config.json'), 'w') as _f:
+                    _json.dump(_cfg, _f, indent=2)
             with open(args.checkpoint_path + '/checkpoint_{}.pth'.format(str(epoch + 1).zfill(2)), 'wb') as f:
                 torch.save(deepsc.state_dict(), f)
             print('Epoch {:02d}: val loss improved to {:.5f} — checkpoint saved.'.format(

@@ -14,7 +14,7 @@ from functools import partial
 from dataset import EurDataset, collate_data, collate_data_bert
 from models.transceiver import DeepSC
 from torch.utils.data import DataLoader
-from utils import BleuScore, SNR_to_noise, greedy_decode, SeqtoText
+from utils import BleuScore, SNR_to_noise, greedy_decode, diffusion_decode, SeqtoText
 from tqdm import tqdm
 import random
 parser = argparse.ArgumentParser()
@@ -42,6 +42,12 @@ parser.add_argument('--bert-score-model', default='bert-base-multilingual-cased'
                     help='Model used by BERTScore for semantic similarity scoring. '
                          'Can differ from --bert-model-name (the encoder model). '
                          'E.g. roberta-large for higher quality scores.')
+parser.add_argument('--use-diffusion-decoder', action='store_true',
+                    help='Use the diffusion decoder variant (must match checkpoint)')
+parser.add_argument('--diff-steps', default=100, type=int,
+                    help='Total DDPM forward-process timesteps T')
+parser.add_argument('--diff-sampling-steps', default=50, type=int,
+                    help='Number of DDIM reverse steps at inference')
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -208,7 +214,7 @@ def performance(args, SNR, net, collate_fn, decode_fn, bert_scorer=None):
 
 def _decode_custom(net, sents, noise_std,
                    StoT, pad_idx, start_idx, channel, max_length):
-    """Decode a batch using the custom-vocab encoder."""
+    """Decode a batch using the custom-vocab encoder (Transformer decoder)."""
     sents = sents.to(device)
     out = greedy_decode(net, sents, noise_std, max_length, pad_idx,
                         start_idx, channel)
@@ -219,9 +225,21 @@ def _decode_custom(net, sents, noise_std,
     return predicted, references
 
 
+def _decode_custom_diffusion(net, sents, noise_std,
+                              StoT, pad_idx, channel, max_length):
+    """Decode a batch using the custom-vocab encoder + diffusion decoder (DDIM)."""
+    sents = sents.to(device)
+    out = diffusion_decode(net, sents, noise_std, max_length, pad_idx, channel)
+    sentences = out.cpu().numpy().tolist()
+    predicted = list(map(StoT.sequence_to_text, sentences))
+    target_sent = sents.cpu().numpy().tolist()
+    references = list(map(StoT.sequence_to_text, target_sent))
+    return predicted, references
+
+
 def _decode_bert(net, sents, noise_std,
                  bert_tokenizer, pad_idx, start_idx, channel, max_length):
-    """Decode a batch using the BERT encoder."""
+    """Decode a batch using the BERT encoder (Transformer decoder)."""
     input_ids = sents['input_ids'].to(device)
     attention_mask = sents['attention_mask'].to(device)
 
@@ -229,6 +247,22 @@ def _decode_bert(net, sents, noise_std,
                         start_idx, channel, attention_mask=attention_mask)
 
     # Decode BERT token IDs → strings (skip special tokens)
+    predicted = bert_tokenizer.batch_decode(out.cpu().tolist(),
+                                            skip_special_tokens=True)
+    references = bert_tokenizer.batch_decode(input_ids.cpu().tolist(),
+                                             skip_special_tokens=True)
+    return predicted, references
+
+
+def _decode_bert_diffusion(net, sents, noise_std,
+                            bert_tokenizer, pad_idx, channel, max_length):
+    """Decode a batch using the BERT encoder + diffusion decoder (DDIM)."""
+    input_ids = sents['input_ids'].to(device)
+    attention_mask = sents['attention_mask'].to(device)
+
+    out = diffusion_decode(net, input_ids, noise_std, max_length, pad_idx,
+                           channel, attention_mask=attention_mask)
+
     predicted = bert_tokenizer.batch_decode(out.cpu().tolist(),
                                             skip_special_tokens=True)
     references = bert_tokenizer.batch_decode(input_ids.cpu().tolist(),
@@ -277,10 +311,10 @@ if __name__ == '__main__':
         )
 
         decode_fn = partial(
-            _decode_bert,
+            _decode_bert_diffusion if args.use_diffusion_decoder else _decode_bert,
             bert_tokenizer=bert_tokenizer,
             pad_idx=pad_idx,
-            start_idx=start_idx,
+            **({} if args.use_diffusion_decoder else {'start_idx': start_idx}),
             channel=args.channel,
             max_length=args.MAX_LENGTH,
         )
@@ -298,6 +332,9 @@ if __name__ == '__main__':
             use_bert_encoder=True,
             bert_model_name=args.bert_model_name,
             freeze_bert=True,  # always frozen at eval time
+            use_diffusion_decoder=args.use_diffusion_decoder,
+            diff_steps=args.diff_steps,
+            diff_sampling_steps=args.diff_sampling_steps,
         ).to(device)
 
     else:
@@ -312,18 +349,30 @@ if __name__ == '__main__':
         StoT = SeqtoText(token_to_idx, end_idx)
         collate_fn = collate_data
 
-        decode_fn = partial(
-            _decode_custom,
-            StoT=StoT,
-            pad_idx=pad_idx,
-            start_idx=start_idx,
-            channel=args.channel,
-            max_length=args.MAX_LENGTH,
-        )
+        if args.use_diffusion_decoder:
+            decode_fn = partial(
+                _decode_custom_diffusion,
+                StoT=StoT,
+                pad_idx=pad_idx,
+                channel=args.channel,
+                max_length=args.MAX_LENGTH,
+            )
+        else:
+            decode_fn = partial(
+                _decode_custom,
+                StoT=StoT,
+                pad_idx=pad_idx,
+                start_idx=start_idx,
+                channel=args.channel,
+                max_length=args.MAX_LENGTH,
+            )
 
         deepsc = DeepSC(args.num_layers, num_vocab, num_vocab,
                         num_vocab, num_vocab, args.d_model, args.num_heads,
-                        args.dff, 0.1).to(device)
+                        args.dff, 0.1,
+                        use_diffusion_decoder=args.use_diffusion_decoder,
+                        diff_steps=args.diff_steps,
+                        diff_sampling_steps=args.diff_sampling_steps).to(device)
 
     # Load latest checkpoint
     model_paths = []
@@ -336,8 +385,42 @@ if __name__ == '__main__':
     model_paths.sort(key=lambda x: x[1])
     model_path, _ = model_paths[-1]
     checkpoint = torch.load(model_path, map_location=device)
-    deepsc.load_state_dict(checkpoint)
+
+    # --- auto-recover architecture config from the checkpoint directory ------
+    _cfg_path = os.path.join(args.checkpoint_path, 'config.json')
+    if os.path.exists(_cfg_path):
+        import json as _json
+        with open(_cfg_path) as _f:
+            _cfg = _json.load(_f)
+        # Only override if not explicitly set by the user on the command line
+        if _cfg.get('use_diffusion_decoder') and not args.use_diffusion_decoder:
+            print('[INFO] config.json: enabling --use-diffusion-decoder automatically.')
+            args.use_diffusion_decoder = True
+        if 'diff_steps' in _cfg:
+            args.diff_steps = _cfg['diff_steps']
+        if 'diff_sampling_steps' in _cfg:
+            args.diff_sampling_steps = _cfg['diff_sampling_steps']
+        print(f'[INFO] Loaded architecture config from {_cfg_path}')
+
+    # strict=False: tolerates mismatches between decoder types (Transformer vs.
+    # diffusion).  Shared weights (encoder, channel_encoder, channel_decoder,
+    # dense) always load correctly.  Decoder-specific mismatches are reported.
+    result = deepsc.load_state_dict(checkpoint, strict=False)
     print('Model loaded from:', model_path)
+    if result.missing_keys:
+        print(f'  [WARNING] {len(result.missing_keys)} weight(s) absent in checkpoint '
+              f'— randomly initialised:')
+        for k in result.missing_keys[:5]:
+            print(f'    - {k}')
+        if len(result.missing_keys) > 5:
+            print(f'    ... and {len(result.missing_keys) - 5} more.')
+    if result.unexpected_keys:
+        print(f'  [INFO]    {len(result.unexpected_keys)} checkpoint weight(s) not used '
+              f'by current model — skipped:')
+        for k in result.unexpected_keys[:5]:
+            print(f'    - {k}')
+        if len(result.unexpected_keys) > 5:
+            print(f'    ... and {len(result.unexpected_keys) - 5} more.')
 
     # Optionally build BERTScore evaluator
     bert_scorer = None
