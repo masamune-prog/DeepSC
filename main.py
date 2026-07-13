@@ -267,13 +267,10 @@ if __name__ == '__main__':
                 'checkpoint_{}.pt'.format(str(epoch + 1).zfill(2))
             )
             deepsc.eval()
-            try:
-                scripted = torch.jit.script(deepsc)
-            except Exception as e:
-                print(f'torch.jit.script failed ({e}); falling back to torch.jit.trace.')
-                # Provide a dummy forward pass to trace; adjust as needed for your model's signature.
-                scripted = torch.jit.trace(deepsc, example_inputs=None, strict=False)
-            torch.jit.save(scripted, ckpt_path)
+            # Save the full model object (architecture + weights) via pickle.
+            # This avoids TorchScript limitations with BERT / non-scriptable ops.
+            # Load later with: model = torch.load(ckpt_path, weights_only=False)
+            torch.save(deepsc, ckpt_path)
             deepsc.train()
             print('Epoch {:02d}: val loss improved to {:.5f} — checkpoint saved.'.format(
                 epoch + 1, best_val_loss))
