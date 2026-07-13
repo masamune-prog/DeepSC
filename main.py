@@ -262,8 +262,19 @@ if __name__ == '__main__':
             epochs_no_improve = 0
             if not os.path.exists(args.checkpoint_path):
                 os.makedirs(args.checkpoint_path)
-            with open(args.checkpoint_path + '/checkpoint_{}.pth'.format(str(epoch + 1).zfill(2)), 'wb') as f:
-                torch.save(deepsc.state_dict(), f)
+            ckpt_path = os.path.join(
+                args.checkpoint_path,
+                'checkpoint_{}.pt'.format(str(epoch + 1).zfill(2))
+            )
+            deepsc.eval()
+            try:
+                scripted = torch.jit.script(deepsc)
+            except Exception as e:
+                print(f'torch.jit.script failed ({e}); falling back to torch.jit.trace.')
+                # Provide a dummy forward pass to trace; adjust as needed for your model's signature.
+                scripted = torch.jit.trace(deepsc, example_inputs=None, strict=False)
+            torch.jit.save(scripted, ckpt_path)
+            deepsc.train()
             print('Epoch {:02d}: val loss improved to {:.5f} — checkpoint saved.'.format(
                 epoch + 1, best_val_loss))
         else:
