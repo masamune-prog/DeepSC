@@ -4,3 +4,4 @@ w3lib
 tqdm
 scikit-learn
 bert4keras>=0.4.6
+sentence-transformers

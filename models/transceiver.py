@@ -193,25 +193,50 @@ class DecoderLayer(nn.Module):
     
 class Encoder(nn.Module):
     "Core encoder is a stack of N layers"
-    def __init__(self, num_layers, src_vocab_size, max_len, 
-                 d_model, num_heads, dff, dropout = 0.1):
+    def __init__(self, num_layers, src_vocab_size, max_len,
+                 d_model, num_heads, dff, dropout=0.1,
+                 pretrained_embeddings=None, freeze_embeddings=False):
+        """Args:
+            pretrained_embeddings: optional numpy array [src_vocab_size, d_model]
+                whose values are copied into the embedding layer (step 3).
+            freeze_embeddings: if True, embedding weights are frozen after
+                copying (step 4).
+        """
         super(Encoder, self).__init__()
-        
+
         self.d_model = d_model
         self.embedding = nn.Embedding(src_vocab_size, d_model)
+
+        # Step 3 — replace embedding weights with pretrained SBERT+PCA values
+        if pretrained_embeddings is not None:
+            import numpy as np
+            import torch
+            emb_tensor = torch.tensor(
+                np.asarray(pretrained_embeddings, dtype=np.float32)
+            )
+            assert emb_tensor.shape == (src_vocab_size, d_model), (
+                f'pretrained_embeddings shape {emb_tensor.shape} does not match '
+                f'({src_vocab_size}, {d_model})'
+            )
+            self.embedding.weight = nn.Parameter(emb_tensor)
+
+        # Step 4 — freeze embedding weights
+        if freeze_embeddings:
+            self.embedding.weight.requires_grad = False
+
         self.pos_encoding = PositionalEncoding(d_model, dropout, max_len)
-        self.enc_layers = nn.ModuleList([EncoderLayer(d_model, num_heads, dff, dropout) 
-                                            for _ in range(num_layers)])
-        
+        self.enc_layers = nn.ModuleList([EncoderLayer(d_model, num_heads, dff, dropout)
+                                         for _ in range(num_layers)])
+
     def forward(self, x, src_mask):
         "Pass the input (and mask) through each layer in turn."
         # the input size of x is [batch_size, seq_len]
         x = self.embedding(x) * math.sqrt(self.d_model)
         x = self.pos_encoding(x)
-        
+
         for enc_layer in self.enc_layers:
             x = enc_layer(x, src_mask)
-        
+
         return x
 
 
@@ -297,12 +322,22 @@ class ChannelDecoder(nn.Module):
         return output
         
 class DeepSC(nn.Module):
-    def __init__(self, num_layers, src_vocab_size, trg_vocab_size, src_max_len,
+    def __init__(self, num_enc_layers, num_dec_layers,
+                 src_vocab_size, trg_vocab_size, src_max_len,
                  trg_max_len, d_model, num_heads, dff, dropout=0.1,
                  use_bert_encoder=False,
                  bert_model_name='bert-base-multilingual-cased',
-                 freeze_bert=True):
+                 freeze_bert=True,
+                 pretrained_embeddings=None,
+                 freeze_embeddings=False):
         """DeepSC transceiver.
+
+        Args:
+            num_enc_layers: number of Transformer encoder layers (step 5: use 1).
+            num_dec_layers: number of Transformer decoder layers (step 5: use 3).
+            pretrained_embeddings: optional numpy array [src_vocab_size, d_model]
+                of SBERT+PCA weights to inject into the encoder embedding (step 3).
+            freeze_embeddings: freeze the encoder embedding after loading (step 4).
 
         When use_bert_encoder=True:
           - src_vocab_size is ignored (BERT has its own embeddings).
@@ -318,21 +353,24 @@ class DeepSC(nn.Module):
                 bert_model_name, d_model, freeze=freeze_bert
             )
         else:
+            # Step 5: encoder uses num_enc_layers (target: 1)
             self.encoder = Encoder(
-                num_layers, src_vocab_size, src_max_len, d_model, num_heads, dff, dropout
+                num_enc_layers, src_vocab_size, src_max_len, d_model, num_heads, dff,
+                dropout,
+                pretrained_embeddings=pretrained_embeddings,
+                freeze_embeddings=freeze_embeddings,
             )
 
         self.channel_encoder = nn.Sequential(
             nn.Linear(d_model, 256),
             nn.ReLU(inplace=True),
-            #increase bandwidth temp from 16->32
             nn.Linear(256, 16)
         )
-        #change the receiver part too
         self.channel_decoder = ChannelDecoder(16, d_model, 512)
 
+        # Step 5: decoder uses num_dec_layers (target: 3)
         self.decoder = Decoder(
-            num_layers, trg_vocab_size, trg_max_len, d_model, num_heads, dff, dropout
+            num_dec_layers, trg_vocab_size, trg_max_len, d_model, num_heads, dff, dropout
         )
 
         self.dense = nn.Linear(d_model, trg_vocab_size)
