@@ -1,0 +1,15 @@
+channel,checkpoint,snr_db,bleu1,bleu2,bleu3,bleu4
+Rayleigh,deepsc-multi,0,0.566273,0.433288,0.372334,0.331136
+Rayleigh,deepsc-multi,3,0.749,0.649575,0.59077,0.545653
+Rayleigh,deepsc-multi,6,0.846698,0.773543,0.722334,0.679082
+Rayleigh,deepsc-multi,9,0.896047,0.836969,0.791084,0.75013
+Rayleigh,deepsc-multi,12,0.911773,0.860647,0.819912,0.782967
+Rayleigh,deepsc-multi,15,0.926759,0.881142,0.843186,0.808065
+Rayleigh,deepsc-multi,18,0.945712,0.903257,0.865277,0.829578
+Rayleigh,deepsc-multi,0,0.566273,0.433288,0.372334,0.331136
+Rayleigh,deepsc-multi,3,0.749,0.649575,0.59077,0.545653
+Rayleigh,deepsc-multi,6,0.846698,0.773543,0.722334,0.679082
+Rayleigh,deepsc-multi,9,0.896047,0.836969,0.791084,0.75013
+Rayleigh,deepsc-multi,12,0.911773,0.860647,0.819912,0.782967
+Rayleigh,deepsc-multi,15,0.926759,0.881142,0.843186,0.808065
+Rayleigh,deepsc-multi,18,0.945712,0.903257,0.865277,0.829578

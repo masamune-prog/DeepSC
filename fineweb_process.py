@@ -16,13 +16,13 @@ import pandas as pd
 from tqdm import tqdm
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--input-parquet', default='txt/0.parquet', type=str,
+parser.add_argument('--input-parquet', default='0.parquet', type=str,
                     help='Path to the input 0.parquet FineWeb file')
 parser.add_argument('--text-column', default='text', type=str,
                     help='Column name containing raw text in the parquet file')
-parser.add_argument('--output-train-dir', default='txt/train_data.pkl', type=str)
-parser.add_argument('--output-test-dir', default='txt/test_data.pkl', type=str)
-parser.add_argument('--output-vocab', default='txt/vocab.json', type=str)
+parser.add_argument('--output-train-dir', default='finewebtxt/train_data.pkl', type=str)
+parser.add_argument('--output-test-dir', default='finewebtxt/test_data.pkl', type=str)
+parser.add_argument('--output-vocab', default='finewebtxt/vocab.json', type=str)
 
 SPECIAL_TOKENS = {
     '<PAD>': 0,

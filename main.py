@@ -15,7 +15,7 @@ import numpy as np
 from functools import partial
 from utils import SNR_to_noise, initNetParams, train_step, val_step, train_mi
 from dataset import EurDataset, collate_data, collate_data_bert
-from models.transceiver import DeepSC
+from models.transceiver import DeepSC,Decoder
 from models.mutual_info import Mine
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -30,7 +30,10 @@ parser.add_argument('--MAX-LENGTH', default=30, type=int)
 parser.add_argument('--MIN-LENGTH', default=4, type=int)
 parser.add_argument('--d-model', default=128, type=int)
 parser.add_argument('--dff', default=512, type=int)
-parser.add_argument('--num-layers', default=4, type=int)
+parser.add_argument('--num-enc-layers', default=3, type=int,
+                    help='Number of Transformer encoder layers')
+parser.add_argument('--num-dec-layers', default=3, type=int,
+                    help='Number of Transformer decoder layers')
 parser.add_argument('--num-heads', default=8, type=int)
 parser.add_argument('--batch-size', default=128, type=int)
 parser.add_argument('--epochs', default=80, type=int)
@@ -108,10 +111,11 @@ def train(epoch, args, net, collate_fn, mi_net=None):
     for sents in pbar:
         # Sample a fresh SNR and channel type per batch.
         # start with a high snr for the first few epochs to warm up
-        if epoch < 5:
-            snr_db = np.random.uniform(args.snr_min + 10, args.snr_max)
-        else:
-            snr_db = np.random.uniform(args.snr_min, args.snr_max)
+        # if epoch < 5:
+        #     snr_db = np.random.uniform(args.snr_min + 10, args.snr_max)
+        # else:
+        #     snr_db = np.random.uniform(args.snr_min, args.snr_max)
+        snr_db = np.random.uniform(args.snr_min, args.snr_max)
         noise_std = SNR_to_noise(snr_db)
         batch_channel = np.random.choice(args.train_channels)
 
@@ -193,7 +197,7 @@ if __name__ == '__main__':
         )
 
         deepsc = DeepSC(
-            args.num_layers,
+            args.num_dec_layers if args.num_layers is None else args.num_layers,
             src_vocab_size=bert_vocab_size,   # unused by BertSemanticEncoder
             trg_vocab_size=bert_vocab_size,
             src_max_len=args.MAX_LENGTH,
@@ -218,9 +222,14 @@ if __name__ == '__main__':
 
         collate_fn = collate_data
 
-        deepsc = DeepSC(args.num_layers, num_vocab, num_vocab,
+        enc_layers = args.num_layers if args.num_layers is not None else args.num_enc_layers
+        dec_layers = args.num_layers if args.num_layers is not None else args.num_dec_layers
+        deepsc = DeepSC(enc_layers, num_vocab, num_vocab,
                         num_vocab, num_vocab, args.d_model, args.num_heads,
                         args.dff, 0.1).to(device)
+        if dec_layers != enc_layers:
+            deepsc.decoder = Decoder(dec_layers, num_vocab, num_vocab,
+                                     args.d_model, args.num_heads, args.dff, 0.1).to(device)
 
     mi_net = Mine().to(device)
     criterion = nn.CrossEntropyLoss(reduction='none')

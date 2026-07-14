@@ -6,6 +6,7 @@
 @Time: 2021/4/1 11:48
 """
 import os
+import csv
 import json
 import torch
 import argparse
@@ -26,10 +27,22 @@ parser.add_argument('--MAX-LENGTH', default=30, type=int)
 parser.add_argument('--MIN-LENGTH', default=4, type=int)
 parser.add_argument('--d-model', default=128, type=int)
 parser.add_argument('--dff', default=512, type=int)
-parser.add_argument('--num-layers', default=4, type=int)
+parser.add_argument('--num-layers', default=None, type=int,
+                    help='(Deprecated) Sets both encoder and decoder layers. '
+                         'Prefer --num-enc-layers / --num-dec-layers.')
+parser.add_argument('--num-enc-layers', default=3, type=int,
+                    help='Number of Transformer encoder layers (overridden by checkpoint auto-detection)')
+parser.add_argument('--num-dec-layers', default=3, type=int,
+                    help='Number of Transformer decoder layers (overridden by checkpoint auto-detection)')
 parser.add_argument('--num-heads', default=8, type=int)
 parser.add_argument('--batch-size', default=64, type=int)
 parser.add_argument('--epochs', default=2, type=int)
+parser.add_argument('--output-csv', default=None, type=str,
+                    help='Path to CSV file for saving aggregate results. '
+                         'Defaults to results_<channel>_<model>.csv in the checkpoint directory.')
+parser.add_argument('--predictions-csv', default=None, type=str,
+                    help='Path to CSV file for saving per-sentence predictions. '
+                         'Defaults to predictions_<channel>_<model>.csv in the checkpoint directory.')
 # BERT encoder options
 parser.add_argument('--use-bert-encoder', action='store_true',
                     help='Use the BERT encoder variant of DeepSC')
@@ -123,6 +136,8 @@ def performance(args, SNR, net, collate_fn, decode_fn, bert_scorer=None):
             shape [len(SNR)] containing the mean n-gram BLEU for that order.
         bert_scores: dict with keys 'f1', 'precision', 'recall', each
             np.ndarray of shape [len(SNR)].  Empty dict if bert_scorer is None.
+        all_sentences: list of dicts, one per sentence, with keys
+            'epoch', 'snr_db', 'sample_idx', 'predicted', 'reference'.
     """
     bleu_scorers = {
         'bleu1': BleuScore(1, 0, 0, 0),
@@ -137,6 +152,7 @@ def performance(args, SNR, net, collate_fn, decode_fn, bert_scorer=None):
 
     all_bleu = {k: [] for k in bleu_scorers}
     all_bert_f1, all_bert_p, all_bert_r = [], [], []
+    all_sentences = []  # flat list of per-sentence records
 
     net.eval()
     with torch.no_grad():
@@ -156,6 +172,16 @@ def performance(args, SNR, net, collate_fn, decode_fn, bert_scorer=None):
 
                 Tx_word.append(word)
                 Rx_word.append(target_word)
+
+                # Collect per-sentence records for this SNR.
+                for sample_idx, (pred, ref) in enumerate(zip(word, target_word)):
+                    all_sentences.append({
+                        'epoch':      epoch,
+                        'snr_db':     snr,
+                        'sample_idx': sample_idx,
+                        'predicted':  pred,
+                        'reference':  ref,
+                    })
 
             bleu_epoch = {k: [] for k in bleu_scorers}
             bert_f1_epoch, bert_p_epoch, bert_r_epoch = [], [], []
@@ -198,7 +224,7 @@ def performance(args, SNR, net, collate_fn, decode_fn, bert_scorer=None):
         bert_scores['precision'] = np.mean(np.array(all_bert_p),  axis=0)
         bert_scores['recall']    = np.mean(np.array(all_bert_r),  axis=0)
 
-    return bleu_scores, bert_scores
+    return bleu_scores, bert_scores, all_sentences
 
 
 
@@ -290,15 +316,18 @@ if __name__ == '__main__':
                                if k.startswith('decoder.dec_layers.')})
 
     if enc_layers_in_ckpt or dec_layers_in_ckpt:
-        enc_num_layers = enc_layers_in_ckpt if enc_layers_in_ckpt else args.num_layers
-        dec_num_layers = dec_layers_in_ckpt if dec_layers_in_ckpt else args.num_layers
-        if enc_num_layers != args.num_layers or dec_num_layers != args.num_layers:
+        _arg_enc = args.num_layers if args.num_layers is not None else args.num_enc_layers
+        _arg_dec = args.num_layers if args.num_layers is not None else args.num_dec_layers
+        enc_num_layers = enc_layers_in_ckpt if enc_layers_in_ckpt else _arg_enc
+        dec_num_layers = dec_layers_in_ckpt if dec_layers_in_ckpt else _arg_dec
+        if enc_num_layers != _arg_enc or dec_num_layers != _arg_dec:
             print(f'[INFO] Checkpoint has {enc_num_layers} encoder layer(s) and '
                   f'{dec_num_layers} decoder layer(s); '
-                  f'overriding --num-layers={args.num_layers}.')
+                  f'overriding CLI args.')
     else:
         # BERT encoder path: no enc_layers keys — use args for both.
-        enc_num_layers = dec_num_layers = args.num_layers
+        enc_num_layers = args.num_layers if args.num_layers is not None else args.num_enc_layers
+        dec_num_layers = args.num_layers if args.num_layers is not None else args.num_dec_layers
 
     # -----------------------------------------------------------------------
     # 2. Build model with the inferred architecture, then load weights.
@@ -402,7 +431,7 @@ if __name__ == '__main__':
             batch_size=args.batch_size,
         )
 
-    bleu_scores, bert_scores = performance(
+    bleu_scores, bert_scores, all_sentences = performance(
         args, SNR, deepsc, collate_fn, decode_fn, bert_scorer=bert_scorer
     )
 
@@ -428,3 +457,60 @@ if __name__ == '__main__':
                     f' | {bert_scores["precision"][i]:>8.4f}'
                     f' | {bert_scores["recall"][i]:>8.4f}')
         print(row)
+
+    model_tag = os.path.basename(args.checkpoint_path.rstrip('/\\'))
+
+    # -----------------------------------------------------------------------
+    # Save aggregate metrics to CSV (one row per SNR point).
+    # -----------------------------------------------------------------------
+    csv_path = (args.output_csv
+                if args.output_csv
+                else os.path.join(args.checkpoint_path,
+                                  f'results_{args.channel}_{model_tag}.csv'))
+
+    fieldnames = ['channel', 'checkpoint', 'snr_db',
+                  'bleu1', 'bleu2', 'bleu3', 'bleu4']
+    if bert_scores:
+        fieldnames += ['bert_f1', 'bert_precision', 'bert_recall']
+
+    write_header = not os.path.exists(csv_path)
+    with open(csv_path, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if write_header:
+            writer.writeheader()
+        for i, snr in enumerate(SNR):
+            record = {
+                'channel':    args.channel,
+                'checkpoint': model_tag,
+                'snr_db':     snr,
+                'bleu1':      round(float(bleu_scores['bleu1'][i]), 6),
+                'bleu2':      round(float(bleu_scores['bleu2'][i]), 6),
+                'bleu3':      round(float(bleu_scores['bleu3'][i]), 6),
+                'bleu4':      round(float(bleu_scores['bleu4'][i]), 6),
+            }
+            if bert_scores:
+                record['bert_f1']        = round(float(bert_scores['f1'][i]),        6)
+                record['bert_precision'] = round(float(bert_scores['precision'][i]), 6)
+                record['bert_recall']    = round(float(bert_scores['recall'][i]),    6)
+            writer.writerow(record)
+
+    print(f'\nResults saved to: {csv_path}')
+
+    # -----------------------------------------------------------------------
+    # Save per-sentence predictions to a second CSV
+    # (one row per test sentence × SNR × epoch).
+    # -----------------------------------------------------------------------
+    pred_csv_path = (args.predictions_csv
+                     if args.predictions_csv
+                     else os.path.join(args.checkpoint_path,
+                                       f'predictions_{args.channel}_{model_tag}.csv'))
+
+    pred_fieldnames = ['epoch', 'snr_db', 'sample_idx', 'predicted', 'reference']
+    pred_write_header = not os.path.exists(pred_csv_path)
+    with open(pred_csv_path, 'a', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=pred_fieldnames)
+        if pred_write_header:
+            writer.writeheader()
+        writer.writerows(all_sentences)
+
+    print(f'Predictions saved to: {pred_csv_path}')
