@@ -1,433 +1,240 @@
-# -*- coding: utf-8 -*-
-"""
-Diffusion-based decoder for DeepSC.
-
-Architecture
-------------
-Training  : DDPM x0-prediction loss (MSE in embedding space).
-Inference : Deterministic DDIM reverse sampling (eta = 0),
-            conditioned on channel_dec_output via cross-attention.
-
-Shapes (all paths)
-------------------
-  memory  : [B, S, d_model]   channel-decoder output (conditioning signal)
-  x0      : [B, S, d_model]   clean target token embeddings
-  x_t     : [B, S, d_model]   noisy embedding at step t
-  x0_pred : [B, S, d_model]   denoiser prediction of x0
-  logits  : [B, S, vocab_size] produced by DeepSC.dense(x0_pred)
-"""
-
 import math
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
 # ---------------------------------------------------------------------------
-# Noise schedule
+# Exact ports of DeepSC's channel primitives (utils.py), so both models are
+# corrupted by the identical physical process. Do not "improve" these without
+# also re-running DeepSC with the same change, or the comparison breaks.
 # ---------------------------------------------------------------------------
 
-def cosine_beta_schedule(T: int, s: float = 0.008) -> torch.Tensor:
-    """Cosine noise schedule (Nichol & Dhariwal, 2021).
+def power_normalize(x):
+    """Matches utils.PowerNormalize exactly: ONE global scalar power over the
+    whole tensor (batch, seq, and feature dims combined), only ever scales
+    down (never up). This is intentionally not per-sample."""
+    power = torch.sqrt(torch.mean(x * x))
+    if power > 1:
+        x = x / power
+    return x
 
-    Returns beta values of shape [T].
+
+def snr_to_noise(snr_db):
+    """Matches utils.SNR_to_noise exactly. Returns the AWGN standard
+    deviation (not variance) assuming a unit-power transmitted signal."""
+    snr = 10 ** (snr_db / 10.0)
+    return 1.0 / math.sqrt(2 * snr)
+
+
+def rayleigh_channel(tx_sig, n_var):
+    """Exact port of utils.Channels.Rayleigh.
+
+    - tx_sig: (..., d) with d even (real/imag pairs).
+    - A SINGLE fading coefficient H is drawn per call and applied to every
+      position and every batch element (matches the original, which draws
+      H once per train_step / val_step, i.e. once per batch).
+    - AWGN with std n_var is added post-fade.
+    - Zero-forcing "channel estimation" (H^-1) is applied after noise,
+      assuming perfect CSI -- matches the original exactly.
     """
-    steps = T + 1
-    t = torch.linspace(0, T, steps, dtype=torch.float64)
-    f = torch.cos(((t / T) + s) / (1.0 + s) * math.pi / 2.0) ** 2
-    alpha_bar = f / f[0]
-    betas = 1.0 - alpha_bar[1:] / alpha_bar[:-1]
-    return torch.clamp(betas, 0.0, 0.999).float()
+    shape = tx_sig.shape
+    device = tx_sig.device
+    assert shape[-1] % 2 == 0, "channel dim must be even (real/imag pairs)"
+
+    H_real = torch.normal(0, math.sqrt(1 / 2), size=[1], device=device)
+    H_imag = torch.normal(0, math.sqrt(1 / 2), size=[1], device=device)
+    H = torch.stack([
+        torch.cat([H_real, -H_imag]),
+        torch.cat([H_imag, H_real]),
+    ], dim=0)  # (2, 2)
+
+    tx_pairs = tx_sig.reshape(shape[0], -1, 2)
+    faded = torch.matmul(tx_pairs, H)
+
+    rx = faded + torch.randn_like(faded) * n_var  # AWGN, std = n_var
+
+    rx = torch.matmul(rx, torch.inverse(H)).reshape(shape)
+    return rx
 
 
-# ---------------------------------------------------------------------------
-# Positional encoding (self-contained copy to avoid circular imports)
-# ---------------------------------------------------------------------------
-
-class PositionalEncoding(nn.Module):
-    """Standard sinusoidal positional encoding."""
-
-    def __init__(self, d_model: int, dropout: float, max_len: int = 5000):
+class ChannelEncoder(nn.Module):
+    """Matches DeepSC's channel_encoder exactly: d_model -> 256 -> bandwidth."""
+    def __init__(self, d_model, bandwidth=16):
         super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
-
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len).unsqueeze(1)
-        div_term = torch.exp(
-            torch.arange(0, d_model, 2) * -(math.log(10000.0) / d_model)
-        )
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0)  # [1, max_len, d_model]
-        self.register_buffer('pe', pe)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.pe[:, : x.size(1)]
-        return self.dropout(x)
-
-
-# ---------------------------------------------------------------------------
-# Timestep embedding
-# ---------------------------------------------------------------------------
-
-class TimestepEmbedding(nn.Module):
-    """Sinusoidal embedding for diffusion timestep t, projected to d_model."""
-
-    def __init__(self, d_model: int):
-        super().__init__()
-        half = d_model // 2
-        freq = torch.exp(
-            -math.log(10000.0)
-            * torch.arange(half, dtype=torch.float32)
-            / max(half - 1, 1)
-        )
-        self.register_buffer('freq', freq)
-        self.mlp = nn.Sequential(
-            nn.Linear(d_model, d_model * 4),
-            nn.SiLU(),
-            nn.Linear(d_model * 4, d_model),
-        )
-
-    def forward(self, t: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            t: [B] integer timestep indices
-        Returns:
-            emb: [B, d_model]
-        """
-        args = t.float().unsqueeze(-1) * self.freq.unsqueeze(0)  # [B, half]
-        emb = torch.cat([torch.sin(args), torch.cos(args)], dim=-1)  # [B, d_model]
-        return self.mlp(emb)
-
-
-# ---------------------------------------------------------------------------
-# Denoiser network
-# ---------------------------------------------------------------------------
-
-class DiffusionDenoiser(nn.Module):
-    """Cross-attention Transformer denoiser conditioned on timestep and memory.
-
-    Args:
-        d_model:    hidden dimension.
-        num_heads:  attention heads.
-        dff:        feed-forward inner dimension.
-        num_layers: number of TransformerDecoderLayer stacks.
-        dropout:    dropout probability.
-    """
-
-    def __init__(
-        self,
-        d_model: int,
-        num_heads: int,
-        dff: int,
-        num_layers: int,
-        dropout: float = 0.1,
-    ):
-        super().__init__()
-        self.t_emb = TimestepEmbedding(d_model)
-        self.input_proj = nn.Linear(d_model, d_model)
-        self.dec_layers = nn.ModuleList([
-            nn.TransformerDecoderLayer(
-                d_model=d_model,
-                nhead=num_heads,
-                dim_feedforward=dff,
-                dropout=dropout,
-                batch_first=True,
-                norm_first=True,   # Pre-LN for training stability
-            )
-            for _ in range(num_layers)
-        ])
-        self.out_norm = nn.LayerNorm(d_model, eps=1e-6)
-        self.out_proj = nn.Linear(d_model, d_model)
-
-    def forward(
-        self,
-        x_t: torch.Tensor,
-        t: torch.Tensor,
-        memory: torch.Tensor,
-    ) -> torch.Tensor:
-        """Predict clean x0 from noisy x_t, conditioned on t and memory.
-
-        Args:
-            x_t:    [B, S, d_model]  noisy sequence at diffusion step t
-            t:      [B]              integer timestep indices
-            memory: [B, S, d_model]  cross-attention key/value (channel-dec output)
-        Returns:
-            x0_pred: [B, S, d_model]
-        """
-        t_emb = self.t_emb(t).unsqueeze(1)        # [B, 1, d_model]
-        h = self.input_proj(x_t) + t_emb          # [B, S, d_model]
-        for layer in self.dec_layers:
-            h = layer(h, memory)                   # cross-attend to memory
-        return self.out_proj(self.out_norm(h))     # [B, S, d_model]
-
-
-# ---------------------------------------------------------------------------
-# Channel-aware forward corruption
-# ---------------------------------------------------------------------------
-
-def _apply_channel_forward(
-    x_scaled: torch.Tensor,
-    channel: str,
-    n_var_t: torch.Tensor,
-    device: torch.device,
-) -> torch.Tensor:
-    """Corrupt a (schedule-scaled) embedding using the given physical channel.
-
-    This replaces the standard Gaussian noise in the DDPM forward process
-    with channel-typed noise, making the denoiser channel-aware.
-
-    The noise magnitude at diffusion step t is:
-        n_var_t = n_var * sqrt(1 - ᾱ_t)
-    so the corruption fades from 0 (at t=0) to n_var (at t=T-1).
-
-    For Rayleigh / Rician: pairs of embedding dimensions are treated as
-    complex-valued symbols (same convention as ``utils.Channels``). The
-    fading matrix H is applied, AWGN is added, then H is inverted (perfect
-    equalization).  A single H realization is shared across the batch,
-    consistent with ``utils.Channels``.
-
-    Args:
-        x_scaled: [B, S, d_model]  signal already scaled by sqrt(ᾱ_t).
-        channel:  one of 'AWGN', 'Rayleigh', 'Rician'.
-        n_var_t:  [B, 1, 1] per-sample noise std at the current timestep.
-        device:   torch device.
-
-    Returns:
-        x_t: [B, S, d_model]  channel-corrupted signal.
-    """
-    shape = x_scaled.shape
-    B, S, d = shape
-
-    if channel == 'AWGN':
-        # Standard Gaussian noise, supports per-sample variance via broadcasting
-        return x_scaled + torch.randn(*shape, device=device) * n_var_t
-
-    elif channel in ('Rayleigh', 'Rician'):
-        # Single channel realisation per forward call (batch-shared H)
-        n_var_scalar: float = n_var_t.mean().item()
-
-        if channel == 'Rayleigh':
-            H_real = torch.normal(torch.zeros(1), math.sqrt(0.5)).item()
-            H_imag = torch.normal(torch.zeros(1), math.sqrt(0.5)).item()
-        else:  # Rician, K = 1
-            K = 1
-            mean_h = math.sqrt(K / (K + 1))
-            std_h  = math.sqrt(1.0 / (K + 1))
-            H_real = torch.normal(torch.full((1,), mean_h), std_h).item()
-            H_imag = torch.normal(torch.full((1,), mean_h), std_h).item()
-
-        H = torch.tensor(
-            [[H_real, -H_imag],
-             [H_imag,  H_real]], dtype=x_scaled.dtype, device=device
-        )  # [2, 2]
-
-        # Treat pairs of embedding dims as complex symbols: [B, S*d//2, 2]
-        x_pairs  = x_scaled.reshape(B, -1, 2)
-        x_faded  = torch.matmul(x_pairs, H)                               # fading
-        awgn     = torch.normal(0, n_var_scalar, size=x_faded.shape).to(device)
-        x_eq     = torch.matmul(x_faded + awgn, torch.inverse(H))         # equalize
-        return x_eq.reshape(shape)
-
-    else:
-        raise ValueError(
-            f"Unknown channel '{channel}'. Choose one of: AWGN, Rayleigh, Rician."
+        self.net = nn.Sequential(
+            nn.Linear(d_model, 256),
+            nn.ReLU(inplace=True),
+            nn.Linear(256, bandwidth),
         )
 
+    def forward(self, x):
+        return self.net(x)
 
 
-class DiffusionDecoder(nn.Module):
-    """DDPM training + DDIM inference decoder that replaces the autoregressive
-    Transformer decoder in DeepSC.
-
-    During **training**, `forward()` draws a random timestep, corrupts the
-    clean target embedding with Gaussian noise, and returns the MSE loss
-    between the denoiser's x0 prediction and the true clean embedding.
-
-    During **inference**, `sample()` runs a deterministic DDIM reverse
-    diffusion (eta = 0) starting from pure Gaussian noise, conditioned on
-    the channel-decoder output (memory).
-
-    Args:
-        trg_vocab_size: vocabulary size for target token embedding.
-        max_len:        maximum sequence length.
-        d_model:        hidden dimension (must match the rest of DeepSC).
-        num_heads:      attention heads for the denoiser layers.
-        dff:            feed-forward inner dimension for denoiser layers.
-        num_layers:     number of denoiser cross-attention layers.
-        diff_steps:     T — total number of forward-process timesteps.
-        sampling_steps: number of DDIM reverse steps at inference.
-        dropout:        dropout probability.
-    """
-
-    def __init__(
-        self,
-        trg_vocab_size: int,
-        max_len: int,
-        d_model: int,
-        num_heads: int,
-        dff: int,
-        num_layers: int,
-        diff_steps: int = 100,
-        sampling_steps: int = 50,
-        dropout: float = 0.1,
-    ):
+class ChannelDecoder(nn.Module):
+    """Exact port of DeepSC's ChannelDecoder(in_features=bandwidth, size1=d_model, size2=512)."""
+    def __init__(self, in_features, size1, size2):
         super().__init__()
-        self.d_model = d_model
-        self.T = diff_steps
-        self.sampling_steps = sampling_steps
+        self.linear1 = nn.Linear(in_features, size1)
+        self.linear2 = nn.Linear(size1, size2)
+        self.linear3 = nn.Linear(size2, size1)
+        self.layernorm = nn.LayerNorm(size1, eps=1e-6)
 
-        # Embedding for x0 construction during training
-        self.embedding = nn.Embedding(trg_vocab_size, d_model)
-        self.pos_encoding = PositionalEncoding(d_model, dropout, max_len)
+    def forward(self, x):
+        x1 = self.linear1(x)
+        x2 = F.relu(x1)
+        x3 = self.linear2(x2)
+        x4 = F.relu(x3)
+        x5 = self.linear3(x4)
+        return self.layernorm(x1 + x5)
 
-        self.denoiser = DiffusionDenoiser(d_model, num_heads, dff, num_layers, dropout)
 
-        # Dedicated vocab projection: maps denoised embedding → logits.
-        # Trained in the same embedding space as the denoiser, decoupled
-        # from the external DeepSC.dense (which lives in the AR decoder space).
-        self.vocab_proj = nn.Linear(d_model, trg_vocab_size)
+class RayleighTextDecoderDiffusion(nn.Module):
+    def __init__(self, vocab_size, embed_dim, max_seq_len, num_steps=500,
+                 channel_bandwidth=16, channel_hidden=512):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.embed_dim = embed_dim
+        self.max_seq_len = max_seq_len
+        self.num_steps = num_steps
 
-        # Pre-compute and register noise-schedule buffers
-        betas = cosine_beta_schedule(diff_steps)            # [T]
-        alphas = 1.0 - betas                                # [T]
-        alpha_bar = torch.cumprod(alphas, dim=0)            # [T]
+        # Shared vocabulary embeddings
+        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.pos_embedding = nn.Parameter(torch.randn(1, max_seq_len, embed_dim))
 
-        self.register_buffer('betas', betas)
-        self.register_buffer('alphas', alphas)
-        self.register_buffer('alpha_bar', alpha_bar)
+        # Timestep conditioning MLP
+        self.time_mlp = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim),
+            nn.GELU(),
+            nn.Linear(embed_dim, embed_dim)
+        )
 
-    # ------------------------------------------------------------------
-    # Training
-    # ------------------------------------------------------------------
+        # Channel encoder/decoder, dimension-matched to DeepSC so both models
+        # transmit the same bandwidth through the Rayleigh channel.
+        self.channel_encoder = ChannelEncoder(embed_dim, bandwidth=channel_bandwidth)
+        self.channel_decoder = ChannelDecoder(channel_bandwidth, embed_dim, channel_hidden)
 
-    def forward(
-        self,
-        trg_tokens: torch.Tensor,
-        memory: torch.Tensor,
-        padding_idx: int = None,
-        channel: str = 'AWGN',
-        n_var: float = 0.1,
-    ) -> torch.Tensor:
-        """Compute the DDPM x0-prediction MSE loss with channel-typed noise.
+        # Transformer Denoiser: Processes [Denoising State + Channel Output]
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=embed_dim * 2,
+            nhead=8,
+            dim_feedforward=embed_dim * 8,
+            dropout=0.1,
+            activation='gelu',
+            batch_first=True
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=6)
 
-        Instead of using pure Gaussian noise in the forward process, the
-        corruption q(x_t | x0) is simulated using the specified physical
-        channel (AWGN, Rayleigh, or Rician).  The noise variance at step t
-        is ``n_var * sqrt(1 - ᾱ_t)``, matching the diffusion schedule.
+        self.output_projection = nn.Linear(embed_dim * 2, embed_dim)
 
-        Args:
-            trg_tokens:  [B, S]           target token IDs.
-            memory:      [B, S, d_model]  channel-decoder output (conditioning).
-            padding_idx: if given, pad positions are masked out of the loss.
-            channel:     physical channel type — 'AWGN' (default), 'Rayleigh',
-                         or 'Rician'.  Should match the channel used in the
-                         encoder path during the same training step.
-            n_var:       channel noise std (output of ``SNR_to_noise(snr_db)``).
-        Returns:
-            loss: scalar MSE diffusion loss.
+        beta = torch.linspace(1e-4, 0.02, num_steps)
+        self.register_buffer('beta', beta)
+        self.register_buffer('alpha', 1.0 - beta)
+        self.register_buffer('alpha_bar', torch.cumprod(1.0 - beta, dim=0))
+
+    def apply_rayleigh_channel(self, x_0, snr_db=15):
         """
-        B, S = trg_tokens.shape
-        device = trg_tokens.device
+        Transmits x_0 through the same physical pipeline as DeepSC:
+        channel_encoder -> PowerNormalize -> Rayleigh(H) + AWGN -> zero-forcing
+        equalization -> channel_decoder.
+        """
+        tx = self.channel_encoder(x_0)          # (B, S, bandwidth)
+        tx = power_normalize(tx)
+        n_var = snr_to_noise(snr_db)
+        rx = rayleigh_channel(tx, n_var)         # (B, S, bandwidth)
+        y_corrupted = self.channel_decoder(rx)   # (B, S, embed_dim)
+        return y_corrupted
 
-        # Build clean embedding x0 ∈ R^{B × S × d_model}
-        x0 = self.embedding(trg_tokens) * math.sqrt(self.d_model)
-        x0 = self.pos_encoding(x0)   # [B, S, d_model]
+    def get_time_embedding(self, timesteps):
+        half_dim = self.embed_dim // 2
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, device=timesteps.device) * -emb)
+        emb = timesteps.unsqueeze(1) * emb.unsqueeze(0)
+        emb = torch.cat((torch.sin(emb), torch.cos(emb)), dim=-1)
+        return self.time_mlp(emb)
 
-        # Sample a random diffusion timestep for each item in the batch
-        t = torch.randint(0, self.T, (B,), device=device)   # [B]
+    def forward(self, input_ids, snr_db=15, pad_mask=None):
+        batch_size, seq_len = input_ids.shape
+        device = input_ids.device
 
-        # Forward process: apply physical channel noise scaled by the schedule
-        #   n_var_t = n_var * sqrt(1 − ᾱ_t)  →  0 at t=0, n_var at t=T-1
-        alpha_bar_t = self.alpha_bar[t].view(B, 1, 1)       # [B, 1, 1]
-        x_scaled    = alpha_bar_t.sqrt() * x0               # [B, S, d_model]
-        n_var_t     = n_var * (1.0 - alpha_bar_t).sqrt()    # [B, 1, 1]
-        x_t = _apply_channel_forward(x_scaled, channel, n_var_t, device)
+        x_0 = self.embedding(input_ids)
 
-        # Denoiser predicts clean x0
-        x0_pred = self.denoiser(x_t, t, memory)             # [B, S, d_model]
+        y_corrupted = self.apply_rayleigh_channel(x_0, snr_db=snr_db)
 
-        # --- MSE loss in embedding space ---
-        mse = F.mse_loss(x0_pred, x0, reduction='none')     # [B, S, d_model]
-        if padding_idx is not None:
-            mask = (trg_tokens != padding_idx).float().unsqueeze(-1)  # [B, S, 1]
-            denom = mask.sum() * self.d_model + 1e-8
-            mse_loss = (mse * mask).sum() / denom
+        t = torch.randint(0, self.num_steps, (batch_size,), device=device)
+        a_bar = self.alpha_bar[t].view(batch_size, 1, 1)
+
+        inner_noise = torch.randn_like(x_0)
+        x_t = torch.sqrt(a_bar) * x_0 + torch.sqrt(1 - a_bar) * inner_noise
+
+        t_emb = self.get_time_embedding(t).unsqueeze(1)
+        x_t_prime = x_t + self.pos_embedding[:, :seq_len, :] + t_emb
+
+        model_input = torch.cat([x_t_prime, y_corrupted], dim=-1)
+
+        transformer_out = self.transformer(model_input)
+        predicted_x_0 = self.output_projection(transformer_out)
+
+        # Loss -- masked by pad_mask if provided (channel itself is NOT
+        # masked, matching DeepSC: the channel corrupts padding too, only
+        # the loss ignores it, via loss_function's mask-after-criterion).
+        if pad_mask is not None:
+            mask = pad_mask.unsqueeze(-1).float()
+            loss_mse = ((predicted_x_0 - x_0).pow(2) * mask).sum() / mask.sum().clamp(min=1) / x_0.shape[-1]
         else:
-            mse_loss = mse.mean()
+            loss_mse = F.mse_loss(predicted_x_0, x_0)
 
-        # --- Cross-entropy loss via vocab_proj (trains the projection head) ---
-        logits = self.vocab_proj(x0_pred)                   # [B, S, vocab_size]
-        ce_loss = F.cross_entropy(
-            logits.reshape(-1, logits.size(-1)),
-            trg_tokens.reshape(-1),
-            ignore_index=padding_idx if padding_idx is not None else -100,
-        )
+        logits = torch.matmul(predicted_x_0, self.embedding.weight.T)
+        if pad_mask is not None:
+            loss_round = F.cross_entropy(
+                logits.reshape(-1, self.vocab_size), input_ids.reshape(-1), reduction='none'
+            )
+            flat_mask = pad_mask.reshape(-1).float()
+            loss_round = (loss_round * flat_mask).sum() / flat_mask.sum().clamp(min=1)
+        else:
+            loss_round = F.cross_entropy(logits.reshape(-1, self.vocab_size), input_ids.reshape(-1))
 
-        # Combined loss: MSE keeps the denoiser in embedding space,
-        # CE trains the projection head to map embeddings → correct tokens.
-        return mse_loss + ce_loss
-
-    # ------------------------------------------------------------------
-    # Inference — DDIM (eta = 0, fully deterministic)
-    # ------------------------------------------------------------------
+        return loss_mse + 0.1 * loss_round
 
     @torch.no_grad()
-    def sample(
-        self,
-        memory: torch.Tensor,
-        seq_len: int = None,
-    ) -> torch.Tensor:
-        """DDIM reverse sampling to produce a denoised embedding.
-
-        The result should be passed through ``DeepSC.dense`` and argmax'd
-        to obtain predicted token IDs.
-
-        Args:
-            memory:  [B, S, d_model]  channel-decoder output
-            seq_len: output sequence length (defaults to memory sequence length)
-        Returns:
-            x0_pred: [B, seq_len, d_model]  denoised sequence embedding
+    def decode_channel_output(self, y_corrupted, use_clamping=True):
         """
-        B, S_mem, d = memory.shape
-        seq_len = seq_len if seq_len is not None else S_mem
-        device = memory.device
+        Inference sampling: recovers text embeddings from an already
+        channel-decoded observation (i.e. the output of apply_rayleigh_channel,
+        or an equivalent real transmission decoded the same way).
+        """
+        batch_size, seq_len, d_dim = y_corrupted.shape
+        device = y_corrupted.device
 
-        # Linearly spaced timestep subset for DDIM
-        # indices[0] = 0  (clean),  indices[-1] = T-1  (most noisy)
-        indices = torch.linspace(
-            0, self.T - 1, self.sampling_steps + 1, dtype=torch.long, device=device
-        )
+        x_t = torch.randn(batch_size, seq_len, d_dim, device=device)
 
-        # Start from pure Gaussian noise
-        x = torch.randn(B, seq_len, d, device=device)
+        for i in reversed(range(self.num_steps)):
+            t = torch.full((batch_size,), i, device=device, dtype=torch.long)
+            t_emb = self.get_time_embedding(t).unsqueeze(1)
 
-        # Reverse: from t = T-1 → 0
-        for i in reversed(range(self.sampling_steps)):
-            t_curr = indices[i + 1]   # larger t (noisier)
-            t_prev = indices[i]       # smaller t (cleaner)
+            x_t_prime = x_t + self.pos_embedding[:, :seq_len, :] + t_emb
+            model_input = torch.cat([x_t_prime, y_corrupted], dim=-1)
 
-            t_batch = t_curr.expand(B)   # [B]
+            pred_x_0 = self.output_projection(self.transformer(model_input))
 
-            # Predict x0
-            x0_pred = self.denoiser(x, t_batch, memory)   # [B, S, d_model]
+            if use_clamping and i < self.num_steps * 0.5:
+                logits = torch.matmul(pred_x_0, self.embedding.weight.T)
+                pred_x_0 = self.embedding(logits.argmax(dim=-1))
 
-            a_t    = self.alpha_bar[t_curr]
-            a_prev = self.alpha_bar[t_prev]
+            a_t = self.alpha[i]
+            a_bar_t = self.alpha_bar[i]
 
-            # Clamp to avoid division by zero when a_t ≈ 1 (near t=0)
-            denom = (1.0 - a_t).sqrt().clamp(min=1e-6)
+            if i > 0:
+                a_bar_t_prev = self.alpha_bar[i - 1]
+                mean = (torch.sqrt(a_bar_t_prev) * self.beta[i] / (1 - a_bar_t)) * pred_x_0 + \
+                       (torch.sqrt(a_t) * (1 - a_bar_t_prev) / (1 - a_bar_t)) * x_t
+                var = (1 - a_bar_t_prev) / (1 - a_bar_t) * self.beta[i]
+                x_t = mean + torch.sqrt(var) * torch.randn_like(x_t)
+            else:
+                x_t = pred_x_0
 
-            # Estimated noise direction from x0 prediction
-            # ε_pred = (x_t − √ᾱ_t · x0_pred) / √(1 − ᾱ_t)
-            eps_pred = (x - a_t.sqrt() * x0_pred) / denom
-
-            # DDIM update (eta = 0: no stochasticity)
-            # x_{t-1} = √ᾱ_{t-1} · x0_pred + √(1 − ᾱ_{t-1}) · ε_pred
-            x = a_prev.sqrt() * x0_pred + (1.0 - a_prev).sqrt() * eps_pred
-
-        # Return logits directly from the diffusion decoder's own projection head.
-        # Do NOT pass through DeepSC.dense — that layer lives in the AR decoder
-        # embedding space and was never trained against the diffusion x0 space.
-        logits = self.vocab_proj(x)    # [B, seq_len, vocab_size]
-        return logits
+        final_logits = torch.matmul(x_t, self.embedding.weight.T)
+        return final_logits.argmax(dim=-1)
