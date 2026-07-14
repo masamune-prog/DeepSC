@@ -18,5 +18,6 @@ checkpoints/
 /checkpoints/deepsc-mi/Rayleigh/*
 /checkpoints/deepsc-Rayleigh/* 
 txt/
+finewebtxt/*
+0.parquet
 *.tgz
-.parquet
