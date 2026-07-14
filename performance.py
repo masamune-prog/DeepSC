@@ -410,7 +410,7 @@ if __name__ == '__main__':
     sep_width = 10 + 4 * 11 + (3 * 11 if bert_scores else 0)  # approx separator width
 
     print('\n' + '='*sep_width)
-    print(' Results')
+    print(' Results for ' + args.channel + ' Channel using' + args.checkpoint_path + ' model')
     print('='*sep_width)
     print(f'{"SNR (dB)":>10} | {"BLEU-1":>8} | {"BLEU-2":>8} | {"BLEU-3":>8} | {"BLEU-4":>8}', end='')
     if bert_scores:
