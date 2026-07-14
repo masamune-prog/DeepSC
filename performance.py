@@ -234,6 +234,7 @@ def _decode_bert(net, sents, noise_std,
     references = bert_tokenizer.batch_decode(input_ids.cpu().tolist(),
                                              skip_special_tokens=True)
     return predicted, references
+
 def setup_seed(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -250,17 +251,69 @@ if __name__ == '__main__':
     setup_seed(10)
     SNR = [0, 3, 6, 9, 12, 15, 18]
 
+    # -----------------------------------------------------------------------
+    # 1. Locate and load the latest checkpoint FIRST — before building the
+    #    model — so we can infer the exact architecture used during training.
+    # -----------------------------------------------------------------------
+    model_paths = []
+    for fn in os.listdir(args.checkpoint_path):
+        if not fn.endswith('.pth') and not fn.endswith('.pt'):
+            continue
+        idx = int(os.path.splitext(fn)[0].split('_')[-1])
+        model_paths.append((os.path.join(args.checkpoint_path, fn), idx))
+
+    if not model_paths:
+        raise FileNotFoundError(f'No .pt/.pth checkpoints found in {args.checkpoint_path}')
+
+    model_paths.sort(key=lambda x: x[1])
+    model_path, _ = model_paths[-1]
+    print(f'Loading checkpoint: {model_path}')
+
+    # Try safe weights-only load; fall back for legacy full-model serialisation.
+    try:
+        raw_ckpt = torch.load(model_path, map_location=device, weights_only=True)
+    except Exception:
+        raw_ckpt = torch.load(model_path, map_location=device, weights_only=False)
+
+    # Normalise to a plain state_dict regardless of how it was saved.
+    if isinstance(raw_ckpt, DeepSC):
+        ckpt_state = raw_ckpt.state_dict()
+    elif isinstance(raw_ckpt, dict):
+        ckpt_state = raw_ckpt
+    else:
+        raise TypeError(f'Unexpected checkpoint type: {type(raw_ckpt)}')
+
+    # Infer encoder / decoder layer counts from the checkpoint keys.
+    enc_layers_in_ckpt = len({k.split('.')[2] for k in ckpt_state
+                               if k.startswith('encoder.enc_layers.')})
+    dec_layers_in_ckpt = len({k.split('.')[2] for k in ckpt_state
+                               if k.startswith('decoder.dec_layers.')})
+
+    if enc_layers_in_ckpt or dec_layers_in_ckpt:
+        enc_num_layers = enc_layers_in_ckpt if enc_layers_in_ckpt else args.num_layers
+        dec_num_layers = dec_layers_in_ckpt if dec_layers_in_ckpt else args.num_layers
+        if enc_num_layers != args.num_layers or dec_num_layers != args.num_layers:
+            print(f'[INFO] Checkpoint has {enc_num_layers} encoder layer(s) and '
+                  f'{dec_num_layers} decoder layer(s); '
+                  f'overriding --num-layers={args.num_layers}.')
+    else:
+        # BERT encoder path: no enc_layers keys — use args for both.
+        enc_num_layers = dec_num_layers = args.num_layers
+
+    # -----------------------------------------------------------------------
+    # 2. Build model with the inferred architecture, then load weights.
+    # -----------------------------------------------------------------------
     if args.use_bert_encoder:
         from transformers import BertTokenizerFast
         print(f'Loading BERT tokenizer: {args.bert_model_name}')
         bert_tokenizer = BertTokenizerFast.from_pretrained(args.bert_model_name)
         bert_vocab_size = bert_tokenizer.vocab_size
 
-        pad_idx = bert_tokenizer.pad_token_id      # 0
+        pad_idx   = bert_tokenizer.pad_token_id    # 0
         start_idx = bert_tokenizer.cls_token_id    # 101
-        end_idx = bert_tokenizer.sep_token_id      # 102
+        end_idx   = bert_tokenizer.sep_token_id    # 102
 
-        # Custom vocab still needed to reverse the existing pkl → raw text
+        # Custom vocab still needed to reverse the existing pkl -> raw text
         vocab = json.load(open(args.vocab_file, 'rb'))
         token_to_idx = vocab['token_to_idx']
         idx_to_token = dict(zip(token_to_idx.values(), token_to_idx.keys()))
@@ -286,7 +339,7 @@ if __name__ == '__main__':
         )
 
         deepsc = DeepSC(
-            args.num_layers,
+            dec_num_layers,
             src_vocab_size=bert_vocab_size,
             trg_vocab_size=bert_vocab_size,
             src_max_len=args.MAX_LENGTH,
@@ -304,10 +357,10 @@ if __name__ == '__main__':
         vocab = json.load(open(args.vocab_file, 'rb'))
         token_to_idx = vocab['token_to_idx']
         idx_to_token = dict(zip(token_to_idx.values(), token_to_idx.keys()))
-        num_vocab = len(token_to_idx)
-        pad_idx = token_to_idx['<PAD>']
-        start_idx = token_to_idx['<START>']
-        end_idx = token_to_idx['<END>']
+        num_vocab  = len(token_to_idx)
+        pad_idx    = token_to_idx['<PAD>']
+        start_idx  = token_to_idx['<START>']
+        end_idx    = token_to_idx['<END>']
 
         StoT = SeqtoText(token_to_idx, end_idx)
         collate_fn = collate_data
@@ -321,25 +374,25 @@ if __name__ == '__main__':
             max_length=args.MAX_LENGTH,
         )
 
-        deepsc = DeepSC(args.num_layers, num_vocab, num_vocab,
+        # DeepSC constructor uses num_layers for both encoder and decoder, so
+        # we build it with enc_num_layers and then patch the decoder if needed.
+        deepsc = DeepSC(enc_num_layers, num_vocab, num_vocab,
                         num_vocab, num_vocab, args.d_model, args.num_heads,
                         args.dff, 0.1).to(device)
 
-    # Load latest checkpoint
-    model_paths = []
-    for fn in os.listdir(args.checkpoint_path):
-        if not fn.endswith('.pth'):
-            continue
-        idx = int(os.path.splitext(fn)[0].split('_')[-1])
-        model_paths.append((os.path.join(args.checkpoint_path, fn), idx))
+        if dec_num_layers != enc_num_layers:
+            # Rebuild decoder with the correct depth.
+            from models.transceiver import Decoder
+            deepsc.decoder = Decoder(dec_num_layers, num_vocab, num_vocab,
+                                     args.d_model, args.num_heads, args.dff, 0.1).to(device)
 
-    model_paths.sort(key=lambda x: x[1])
-    model_path, _ = model_paths[-1]
-    checkpoint = torch.load(model_path, map_location=device)
-    deepsc.load_state_dict(checkpoint)
+    # Load weights into the freshly constructed model.
+    deepsc.load_state_dict(ckpt_state)
     print('Model loaded from:', model_path)
 
-    # Optionally build BERTScore evaluator
+    # -----------------------------------------------------------------------
+    # 3. Optionally build BERTScore evaluator.
+    # -----------------------------------------------------------------------
     bert_scorer = None
     if args.bert_score:
         print(f'Initialising BERTScore evaluator (model: {args.bert_score_model})...')
@@ -354,7 +407,6 @@ if __name__ == '__main__':
     )
 
     # Dynamic column width based on optional BERT columns
-    bert_cols = f' | {"BERT-F1":>8} | {"BERT-P":>8} | {"BERT-R":>8}' if bert_scores else ''
     sep_width = 10 + 4 * 11 + (3 * 11 if bert_scores else 0)  # approx separator width
 
     print('\n' + '='*sep_width)
