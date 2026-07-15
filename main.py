@@ -30,6 +30,9 @@ parser.add_argument('--MAX-LENGTH', default=30, type=int)
 parser.add_argument('--MIN-LENGTH', default=4, type=int)
 parser.add_argument('--d-model', default=128, type=int)
 parser.add_argument('--dff', default=512, type=int)
+parser.add_argument('--num-layers', default=None, type=int,
+                    help='(Deprecated) Sets both encoder and decoder layers. '
+                         'Prefer --num-enc-layers / --num-dec-layers.')
 parser.add_argument('--num-enc-layers', default=3, type=int,
                     help='Number of Transformer encoder layers')
 parser.add_argument('--num-dec-layers', default=3, type=int,
