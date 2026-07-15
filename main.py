@@ -68,7 +68,7 @@ def setup_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 def validate(epoch, args, net, collate_fn):
-    test_eur = EurDataset('test')
+    test_eur = EurDataset('val')
     test_iterator = DataLoader(test_eur, batch_size=args.batch_size, num_workers=0,
                                 pin_memory=True, collate_fn=collate_fn)
     net.eval()
