@@ -204,18 +204,25 @@ def main(args):
         results.append(tokens)
 
     # 6. 90 / 10 train-test split (identical to preprocess_text.py)
-    print('Writing Data')
-    train_data = results[: round(len(results) * 0.9)]
-    test_data  = results[round(len(results) * 0.9):]
+     print('Writing Data')
+    n = len(results)
+    # 80 / 10 / 10  train / val / test split
+    train_end = round(n * 0.8)
+    val_end   = round(n * 0.9)
+    train_data = results[:train_end]
+    val_data   = results[train_end:val_end]
+    test_data  = results[val_end:]
+
+    output_val_dir = args.output_train_dir.replace('train_data', 'val_data')
 
     with open(args.output_train_dir, 'wb') as f:
         pickle.dump(train_data, f)
+    with open(output_val_dir, 'wb') as f:
+        pickle.dump(val_data, f)
     with open(args.output_test_dir, 'wb') as f:
         pickle.dump(test_data, f)
 
-    print(f'Train sentences : {len(train_data)}')
-    print(f'Test  sentences : {len(test_data)}')
-    print('Done.')
+    print(f'Split sizes — train: {len(train_data)}, val: {len(val_data)}, test: {len(test_data)}')
 
 
 if __name__ == '__main__':

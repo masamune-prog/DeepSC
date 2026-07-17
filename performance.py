@@ -19,6 +19,7 @@ from utils import BleuScore, SNR_to_noise, greedy_decode, SeqtoText
 from tqdm import tqdm
 import random
 parser = argparse.ArgumentParser()
+#data-dir is unused, kept for testing purposes
 parser.add_argument('--data-dir', default='txt/train_data.pkl', type=str)
 parser.add_argument('--vocab-file', default='txt/vocab.json', type=str)
 parser.add_argument('--checkpoint-path', default='checkpoints/deepsc-Rayleigh', type=str)

@@ -14,6 +14,8 @@ import numpy as np
 from w3lib.html import remove_tags
 from nltk.translate.bleu_score import sentence_bleu
 from models.mutual_info import sample_batch, mutual_information
+from sentence_transformers import SentenceTransformer
+import torch.nn.functional as F
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -225,7 +227,102 @@ def SNR_to_noise(snr):
 
     return noise_std
 
-def train_step(model, src, trg, n_var, pad, opt, criterion, channel, mi_net=None):
+
+class SemanticSimilarityLoss(nn.Module):
+    """Semantic similarity loss using a frozen Sentence-BERT model.
+
+    Encodes the *source* sentence and the *predicted* (reconstructed) sentence
+    with a shared, frozen SBERT encoder, then returns the mean cosine distance
+    (1 - cosine_similarity) across the batch so it can be minimised alongside
+    the cross-entropy reconstruction loss.
+
+    Args:
+        model_name: Any ``sentence-transformers`` compatible model identifier.
+            Defaults to ``'all-MiniLM-L6-v2'`` — small, fast, and accurate.
+        device: torch device to place the SBERT model on.
+    """
+
+    def __init__(
+        self,
+        model_name: str = 'all-MiniLM-L6-v2',
+        device: torch.device = None,
+    ):
+        super().__init__()
+        self._sbert_device = device or torch.device(
+            'cuda:0' if torch.cuda.is_available() else 'cpu'
+        )
+        self._sbert = SentenceTransformer(model_name, device=str(self._sbert_device))
+        # Freeze all SBERT parameters — it is a *reference* encoder only.
+        for param in self._sbert.parameters():
+            param.requires_grad = False
+
+    @torch.no_grad()
+    def _encode(self, sentences: list) -> torch.Tensor:
+        """Return normalised sentence embeddings as a (B, D) tensor."""
+        embeddings = self._sbert.encode(
+            sentences,
+            convert_to_tensor=True,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+            device=str(self._sbert_device),
+        )
+        return embeddings  # already on self._sbert_device
+
+    def forward(
+        self,
+        src_sentences: list,
+        pred_sentences: list,
+    ) -> torch.Tensor:
+        """Compute mean cosine distance between source and predicted sentences.
+
+        Args:
+            src_sentences:  List[str] of ground-truth / source sentences.
+            pred_sentences: List[str] of model-reconstructed sentences.
+
+        Returns:
+            Scalar tensor: mean (1 - cosine_similarity) ∈ [0, 2].
+        """
+        src_emb  = self._encode(src_sentences)   # (B, D)
+        pred_emb = self._encode(pred_sentences)  # (B, D)
+        # cosine similarity is dot-product of unit vectors
+        cos_sim  = (src_emb * pred_emb).sum(dim=-1)  # (B,)
+        loss     = (1.0 - cos_sim).mean()
+        return loss
+
+
+def _decode_predictions(
+    logits: torch.Tensor,
+    idx_to_token: dict,
+    pad_id: int,
+    end_id: int,
+) -> list:
+    """Convert a (B, T, V) logit tensor to a list of decoded strings.
+
+    Args:
+        logits:      Raw logits from the model head — shape (B, T, V).
+        idx_to_token: Mapping from token index to string token.
+        pad_id:      Index used for padding tokens (skipped in output).
+        end_id:      Index of the end/stop token (decoding stops here).
+
+    Returns:
+        List[str] of length B.
+    """
+    token_ids = logits.argmax(dim=-1)  # (B, T)
+    sentences = []
+    for seq in token_ids:
+        tokens = []
+        for idx in seq.tolist():
+            if idx == end_id:
+                break
+            if idx != pad_id:
+                tok = idx_to_token.get(idx, '')
+                if tok:
+                    tokens.append(tok)
+        sentences.append(' '.join(tokens) if tokens else '<empty>')
+    return sentences
+
+def train_step(model, src, trg, n_var, pad, opt, criterion, channel, mi_net=None,
+               sem_loss_fn=None, sem_weight=0.1, idx_to_token=None, end_id=None):
     model.train()
 
     channels = Channels()
@@ -278,6 +375,24 @@ def train_step(model, src, trg, n_var, pad, opt, criterion, channel, mi_net=None
             mi_lb, _, _ = mutual_information(joint, marginal, mi_net)
             loss = loss + 0.0009 * (-mi_lb)
 
+        if sem_loss_fn is not None and sem_weight > 0.0 and idx_to_token is not None:
+            # Decode source and predicted sentences for semantic comparison.
+            # For the BERT encoder path we use the BERT vocab (idx_to_token must
+            # be the BERT id→token map) and end_id should be the SEP token id.
+            bert_end_id = end_id if end_id is not None else 102  # [SEP]
+            # src_sentences: reconstruct from src_input_ids (skip [CLS]/[SEP]/[PAD])
+            src_sentences  = _decode_predictions(
+                # treat src_input_ids as a (B, T, 1) logit-like tensor via one-hot trick
+                # instead, pass ids directly through a helper call
+                torch.nn.functional.one_hot(
+                    src_input_ids, num_classes=ntokens
+                ).float(),
+                idx_to_token, bert_pad_id, bert_end_id,
+            )
+            pred_sentences = _decode_predictions(pred, idx_to_token, bert_pad_id, bert_end_id)
+            sem_loss = sem_loss_fn(src_sentences, pred_sentences)
+            loss = loss + sem_weight * sem_loss
+
     else:
         trg_inp = trg[:, :-1]
         trg_real = trg[:, 1:]
@@ -311,6 +426,16 @@ def train_step(model, src, trg, n_var, pad, opt, criterion, channel, mi_net=None
             joint, marginal = sample_batch(Tx_sig, Rx_sig)
             mi_lb, _, _ = mutual_information(joint, marginal, mi_net)
             loss = loss + 0.0009 * (-mi_lb)
+
+        if sem_loss_fn is not None and sem_weight > 0.0 and idx_to_token is not None:
+            end_tok_id = end_id if end_id is not None else pad
+            src_sentences  = _decode_predictions(
+                torch.nn.functional.one_hot(src, num_classes=ntokens).float(),
+                idx_to_token, pad, end_tok_id,
+            )
+            pred_sentences = _decode_predictions(pred, idx_to_token, pad, end_tok_id)
+            sem_loss = sem_loss_fn(src_sentences, pred_sentences)
+            loss = loss + sem_weight * sem_loss
 
     loss.backward()
     opt.step()

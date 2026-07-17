@@ -13,7 +13,7 @@ import random
 import torch.nn as nn
 import numpy as np
 from functools import partial
-from utils import SNR_to_noise, initNetParams, train_step, val_step, train_mi
+from utils import SNR_to_noise, initNetParams, train_step, val_step, train_mi, SemanticSimilarityLoss
 from dataset import EurDataset, collate_data, collate_data_bert
 from models.transceiver import DeepSC,Decoder
 from models.mutual_info import Mine
@@ -59,6 +59,12 @@ parser.add_argument('--train-channels', nargs='+',
                          'E.g. --train-channels AWGN Rayleigh')
 parser.add_argument('--log-file', default='training_log.csv', type=str,
                     help='CSV file to write per-epoch train/val loss for plotting')
+parser.add_argument('--sem-weight', default=0.0, type=float,
+                    help='Weight for the semantic similarity loss (0 = disabled). '
+                         'Uses a frozen SBERT model (all-MiniLM-L6-v2) to penalise '
+                         'cosine distance between source and reconstructed sentences.')
+parser.add_argument('--sem-model', default='all-MiniLM-L6-v2', type=str,
+                    help='Sentence-Transformers model name for semantic similarity loss')
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -102,7 +108,8 @@ def validate(epoch, args, net, collate_fn):
     return total / len(test_iterator)
 
 
-def train(epoch, args, net, collate_fn, mi_net=None):
+def train(epoch, args, net, collate_fn, mi_net=None, sem_loss_fn=None,
+          train_idx_to_token=None, train_end_id=None):
     train_eur = EurDataset('train')
     train_iterator = DataLoader(train_eur, batch_size=args.batch_size, num_workers=0,
                                 pin_memory=True, collate_fn=collate_fn)
@@ -135,7 +142,11 @@ def train(epoch, args, net, collate_fn, mi_net=None):
                 )
             else:
                 loss = train_step(net, sents, sents, noise_std, pad_idx,
-                                  optimizer, criterion, batch_channel)
+                                  optimizer, criterion, batch_channel,
+                                  sem_loss_fn=sem_loss_fn,
+                                  sem_weight=args.sem_weight,
+                                  idx_to_token=train_idx_to_token,
+                                  end_id=train_end_id)
                 pbar.set_description(
                     'Epoch: {};  Type: Train; Ch: {}; SNR: {:.0f}dB; Loss: {:.5f}'.format(
                         epoch + 1, batch_channel, snr_db, loss
@@ -154,7 +165,11 @@ def train(epoch, args, net, collate_fn, mi_net=None):
                 )
             else:
                 loss = train_step(net, sents, sents, noise_std, pad_idx,
-                                  optimizer, criterion, batch_channel)
+                                  optimizer, criterion, batch_channel,
+                                  sem_loss_fn=sem_loss_fn,
+                                  sem_weight=args.sem_weight,
+                                  idx_to_token=train_idx_to_token,
+                                  end_id=train_end_id)
                 pbar.set_description(
                     'Epoch: {};  Type: Train; Ch: {}; SNR: {:.0f}dB; Loss: {:.5f}'.format(
                         epoch + 1, batch_channel, snr_db, loss
@@ -237,6 +252,26 @@ if __name__ == '__main__':
     mi_net = Mine().to(device)
     criterion = nn.CrossEntropyLoss(reduction='none')
 
+    # ── Semantic similarity loss (optional) ─────────────────────────────────
+    sem_loss_fn = None
+    if args.sem_weight > 0.0:
+        print(f'Loading SBERT model "{args.sem_model}" for semantic similarity loss…')
+        sem_loss_fn = SemanticSimilarityLoss(
+            model_name=args.sem_model,
+            device=device,
+        )
+        print(f'Semantic loss enabled (weight={args.sem_weight})')
+
+    # Build the idx_to_token map used by the semantic loss decoder.
+    # For the BERT path this maps BERT vocab ids → wordpiece tokens.
+    if args.use_bert_encoder:
+        sem_idx_to_token = {v: k for k, v in bert_tokenizer.get_vocab().items()}
+        sem_end_id = end_idx   # [SEP]
+    else:
+        sem_idx_to_token = {v: k for k, v in token_to_idx.items()}
+        sem_end_id = end_idx
+    # ────────────────────────────────────────────────────────────────────────
+
     # Only optimise trainable parameters (BERT frozen params are excluded automatically)
     optimizer = torch.optim.Adam(
         filter(lambda p: p.requires_grad, deepsc.parameters()),
@@ -258,7 +293,10 @@ if __name__ == '__main__':
     for epoch in range(args.epochs):
         start = time.time()
 
-        avg_train_loss = train(epoch, args, deepsc, collate_fn)
+        avg_train_loss = train(epoch, args, deepsc, collate_fn,
+                               sem_loss_fn=sem_loss_fn,
+                               train_idx_to_token=sem_idx_to_token,
+                               train_end_id=sem_end_id)
         avg_val_loss   = validate(epoch, args, deepsc, collate_fn)
         elapsed = time.time() - start
 
