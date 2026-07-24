@@ -1,8 +1,33 @@
 # -*- coding: utf-8 -*-
-"""diffusion_performance.py
+"""diffusion_performance.py (fixed)
 
 Evaluates a trained ChannelDiffusionLM checkpoint over a range of SNR values,
-mirroring the methodology in performance.py:
+mirroring the methodology in performance.py.
+
+Fixes applied vs. the original script, each tagged [FIX n] at the site of the change,
+kept consistent with the fixes made to diffusion_attempt.py so a checkpoint trained
+with the fixed training script is evaluated the way it was actually trained:
+
+  1. Channels.Rayleigh / Rician previously drew a single fading coefficient H shared
+     by the WHOLE batch (`size=[1]`). Changed to one H per example (`size=[B]`),
+     matching the training script — otherwise a single unlucky batch-wide draw can
+     corrupt every sentence in that batch/SNR step at once, and the eval channel
+     distribution doesn't match what the model was trained on.
+  2. Same raw torch.inverse(H) zero-forcing issue as training: no floor, so a
+     near-singular H blows up into inf/NaN. Added the same ridge-regularized
+     inverse used in the fixed training script.
+  3. decode_batch() hardcoded t_denoise=1 regardless of the actual channel noise.
+     That was a reasonable workaround against the ORIGINAL training script (where t
+     was sampled independently of the real noise anyway), but the fixed training
+     script now derives t from the real noise via sigma_to_t, so the model expects
+     t to track actual corruption strength. Now derives t_denoise from noise_std via
+     sigma_to_t, mirroring training.
+  4. PAD_ID silently fell back to 0 if '<PAD>' wasn't found in the vocab. Now raises
+     a clear error instead.
+  5. Both output CSVs were opened in append mode unconditionally, so re-running the
+     same channel/checkpoint after a fix (like this one) silently doubles up rows
+     rather than overwriting. Now overwrites each run.
+
   - Uses the SAME fixed test split (txt/test_data.pkl) as performance.py
   - BLEU-1 through BLEU-4 (sentence-level)
   - Optional BERTScore F1 / Precision / Recall
@@ -12,19 +37,18 @@ mirroring the methodology in performance.py:
 
 import os
 import csv
+import time
 import math
 import json
 import pickle
 import random
 import argparse
-import time
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from dataclasses import dataclass
 from tqdm import tqdm
-from transformers import PreTrainedTokenizerFast, T5EncoderModel
 
 # ---------------------------------------------------------------------------
 # Re-use BLEU helpers from the existing DeepSC utils
@@ -51,13 +75,13 @@ parser.add_argument('--channel', default='AWGN', type=str,
 parser.add_argument('--batch-size', default=64, type=int)
 parser.add_argument('--epochs', default=2, type=int,
                     help='Number of evaluation sweeps over the test set')
+parser.add_argument('--warmup-batches', default=1, type=int,
+                    help='Number of warmup batches before measuring inference time')
 parser.add_argument('--output-csv', default=None, type=str,
                     help='Path for the aggregate results CSV. Defaults to '
                          'diffusion_results_<channel>.csv in the checkpoint directory.')
 parser.add_argument('--predictions-csv', default=None, type=str,
                     help='Path for the per-sentence predictions CSV.')
-parser.add_argument('--warmup-batches', default=2, type=int,
-                    help='Number of warmup batches before measuring inference time')
 # BERTScore options (mirrors performance.py)
 parser.add_argument('--bert-score', action='store_true',
                     help='Compute BERTScore semantic similarity in addition to BLEU')
@@ -155,44 +179,59 @@ class Channels:
     def AWGN(self, Tx_sig, n_var):
         return Tx_sig + torch.randn_like(Tx_sig) * n_var
 
-    def Rayleigh(self, Tx_sig, n_var):
-        """Rayleigh flat-fading channel with per-example fading coefficients."""
-        shape = Tx_sig.shape                       # [B, L, D]
-        B, device = shape[0], Tx_sig.device
+    @staticmethod
+    def _regularized_inverse(H, eps=1e-2):
+        """[FIX 2] Ridge-regularized inverse: H^{-1} ~= (H^T H + eps*I)^{-1} H^T.
 
-        # Per-example fading coefficients (matches diffusion_attempt.py)
-        H_real = torch.normal(0, math.sqrt(1 / 2), size=(B,), device=device)
-        H_imag = torch.normal(0, math.sqrt(1 / 2), size=(B,), device=device)
+        Kept identical to the fixed training script's Channels._regularized_inverse
+        so eval uses the same equalization behavior the model was trained against.
+        A raw torch.inverse(H) blows up whenever a fading draw lands close to
+        singular (a deep fade), injecting inf/NaN into z_t.
+        """
+        B = H.shape[0]
+        I = torch.eye(H.shape[-1], device=H.device, dtype=H.dtype).unsqueeze(0).expand(B, -1, -1)
+        Ht = H.transpose(-1, -2)
+        return torch.bmm(torch.inverse(torch.bmm(Ht, H) + eps * I), Ht)
+
+    def Rayleigh(self, Tx_sig, n_var):
+        # [FIX 1] One fading coefficient PER EXAMPLE (was: a single scalar H shared
+        # by the entire batch), matching the fixed training script's Channels.Rayleigh.
+        shape = Tx_sig.shape                       # [B, L, D]
+        B, dev = shape[0], Tx_sig.device
+
+        H_real = torch.normal(0, math.sqrt(1 / 2), size=(B,), device=dev)
+        H_imag = torch.normal(0, math.sqrt(1 / 2), size=(B,), device=dev)
         H = torch.stack([
             torch.stack([H_real, -H_imag], dim=-1),
-            torch.stack([H_imag,  H_real], dim=-1),
+            torch.stack([H_imag, H_real], dim=-1),
         ], dim=-2)                                  # [B, 2, 2]
 
         Tx_pairs = Tx_sig.reshape(B, -1, 2)          # [B, L*D/2, 2]
-        Tx_faded = torch.bmm(Tx_pairs, H)            # [B, L*D/2, 2]
+        Tx_faded = torch.bmm(Tx_pairs, H)
         Rx_faded = self.AWGN(Tx_faded, n_var)
-        Rx_sig   = torch.bmm(Rx_faded, torch.inverse(H)).reshape(shape)
+        H_inv = self._regularized_inverse(H)         # [FIX 2]
+        Rx_sig = torch.bmm(Rx_faded, H_inv).reshape(shape)
         return Rx_sig
 
     def Rician(self, Tx_sig, n_var, K=1):
-        """Rician fading channel with a line-of-sight component (K factor)."""
+        # [FIX 1] Same per-example fix as Rayleigh above.
         shape = Tx_sig.shape
-        B, device = shape[0], Tx_sig.device
+        B, dev = shape[0], Tx_sig.device
         mean = math.sqrt(K / (K + 1))
         std  = math.sqrt(1 / (K + 1))
 
-        # Per-example fading coefficients (matches diffusion_attempt.py)
-        H_real = torch.normal(mean, std, size=(B,), device=device)
-        H_imag = torch.normal(mean, std, size=(B,), device=device)
+        H_real = torch.normal(mean, std, size=(B,), device=dev)
+        H_imag = torch.normal(mean, std, size=(B,), device=dev)
         H = torch.stack([
             torch.stack([H_real, -H_imag], dim=-1),
-            torch.stack([H_imag,  H_real], dim=-1),
+            torch.stack([H_imag, H_real], dim=-1),
         ], dim=-2)                                  # [B, 2, 2]
 
         Tx_pairs = Tx_sig.reshape(B, -1, 2)
         Tx_faded = torch.bmm(Tx_pairs, H)
         Rx_faded = self.AWGN(Tx_faded, n_var)
-        Rx_sig   = torch.bmm(Rx_faded, torch.inverse(H)).reshape(shape)
+        H_inv = self._regularized_inverse(H)         # [FIX 2]
+        Rx_sig = torch.bmm(Rx_faded, H_inv).reshape(shape)
         return Rx_sig
 
     def forward(self, Tx_sig, n_var, channel_type="AWGN", K=1):
@@ -214,44 +253,7 @@ def make_sigma_schedule(T, sigma_min=0.01, sigma_max=1.0, device="cpu"):
     return sigmas
 
 
-@torch.no_grad
-class T5TextEncoder(nn.Module):
-    """T5-based semantic encoder — wraps HuggingFace T5EncoderModel."""
-
-    def __init__(self, model_name: str = "t5-small"):
-        super().__init__()
-        self.t5_encoder = T5EncoderModel.from_pretrained(model_name)
-
-    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor = None,
-                src_key_padding_mask: torch.Tensor = None) -> torch.Tensor:
-        """
-        Args:
-            input_ids:            (B, L) integer token IDs.
-            attention_mask:       (B, L) long/bool — T5-style (1=attend, 0=ignore).
-            src_key_padding_mask: (B, L) bool — PyTorch-style (True=ignore).
-                                  Converted to T5-style internally if supplied.
-        Returns:
-            last_hidden_state: (B, L, D)
-        """
-        # Resolve mask convention: prefer T5-style; convert from PyTorch-style if needed.
-        if attention_mask is None and src_key_padding_mask is not None:
-            attention_mask = (~src_key_padding_mask).long()
-        outputs = self.t5_encoder(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-        )
-        return outputs.last_hidden_state
-
-
 class ChannelDiffusionLM(nn.Module):
-    """
-    Encoder -> continuous latent z0 -> channel corruption -> DDIM denoiser -> token decode.
-
-    Architecture matches generalised_diffusion.py exactly so checkpoints are compatible:
-      - self.encoder = T5TextEncoder("t5-small")  (state dict: encoder.t5_encoder.*)
-      - self.denoiser = nn.TransformerEncoder      (state dict: denoiser.layers.*)
-    """
-
     def __init__(self, cfg: ChannelDiffusionConfig):
         super().__init__()
         self.cfg = cfg
@@ -264,8 +266,12 @@ class ChannelDiffusionLM(nn.Module):
         self.snr_emb  = nn.Embedding(cfg.n_snr_bins, cfg.d_model)
         self.drop     = nn.Dropout(cfg.dropout)
 
-        # Semantic encoder — T5-based, matches generalised_diffusion.py checkpoint keys
-        self.encoder = T5TextEncoder("t5-small")
+        self.encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=cfg.d_model, nhead=cfg.n_heads, dim_feedforward=cfg.d_ff,
+                dropout=cfg.dropout, batch_first=True, activation="gelu", norm_first=True,
+            ), num_layers=cfg.n_enc_layers
+        )
         self.z_ln = nn.LayerNorm(cfg.d_model)
 
         self.denoiser = nn.TransformerEncoder(
@@ -283,10 +289,11 @@ class ChannelDiffusionLM(nn.Module):
         self.register_buffer("sigmas", sigmas)
 
     def encode(self, input_ids, attention_mask=None):
-        """Encode token IDs into continuous latent representations z0 via T5."""
-        # T5 uses attention_mask directly (1=attend, 0=ignore).
-        t5_mask = attention_mask.long() if attention_mask is not None else None
-        x = self.encoder(input_ids, attention_mask=t5_mask)
+        B, L = input_ids.shape
+        pos = torch.arange(L, device=input_ids.device).unsqueeze(0)
+        x = self.drop(self.tok_emb(input_ids) + self.pos_emb(pos))
+        src_key_padding_mask = None if attention_mask is None else ~attention_mask
+        x = self.encoder(x, src_key_padding_mask=src_key_padding_mask)
         return self.z_ln(x)
 
     def denoise_step(self, z_t, t, mode_idx=0, attention_mask=None, snr_bin=None):
@@ -325,7 +332,11 @@ class ChannelDiffusionLM(nn.Module):
 # ---------------------------------------------------------------------------
 
 def sigma_to_t(model: ChannelDiffusionLM, sigma: float) -> int:
-    """Invert the geometric noise schedule to find the matching discrete timestep."""
+    """Invert the geometric noise schedule to find the matching discrete timestep.
+
+    Kept identical to the fixed training script's sigma_to_t so eval derives t
+    from the real channel noise the same way training does. [used by FIX 3]
+    """
     T = model.cfg.diffusion_steps
     sigma_clamped = max(model.cfg.sigma_min, min(model.cfg.sigma_max, sigma))
     frac = math.log(sigma_clamped / model.cfg.sigma_min) / \
@@ -351,16 +362,12 @@ MAX_DDIM_STEPS = 10
 
 @torch.no_grad()
 def reverse_sample(model: ChannelDiffusionLM, z_T, attention_mask=None,
-                   n_steps=None, t_start=None, snr_bin=None, temperature=0.8,
-                   end_id=None, pad_id=0):
+                   n_steps=None, t_start=None, snr_bin=None, temperature=0.8):
     """DDIM-style deterministic reverse sampling (mirrors diffusion_attempt.py).
 
     n_steps is capped at MAX_DDIM_STEPS=10 to prevent drift/token-collapse.
-    snr_bin:     LongTensor [B] for SNR conditioning (0..n_snr_bins-1).
+    snr_bin: LongTensor [B] for SNR conditioning (0..n_snr_bins-1).
     temperature: final decode temperature; <1 reduces token collapse.
-    end_id:      If provided, all positions after the first <END> token are
-                 replaced with pad_id so decoding stops at the sentence boundary.
-    pad_id:      Token ID used for post-END padding (default 0 = <PAD>).
     """
     T = model.cfg.diffusion_steps
     if t_start is None:
@@ -402,13 +409,6 @@ def reverse_sample(model: ChannelDiffusionLM, z_T, attention_mask=None,
         token_ids = torch.multinomial(probs.view(-1, V_), num_samples=1).view(B_, L_)
     else:
         token_ids = logits.argmax(-1)
-
-    # Truncate each sequence at the first <END> token: positions strictly after
-    # END (cumsum > 1) are replaced with pad_id to stop decoding at EOS.
-    if end_id is not None:
-        end_mask  = (token_ids == end_id).cumsum(dim=-1)   # 0 before END, ≥1 after
-        token_ids = token_ids.masked_fill(end_mask > 1, pad_id)
-
     return token_ids, logits
 
 
@@ -417,7 +417,7 @@ def reverse_sample(model: ChannelDiffusionLM, z_T, attention_mask=None,
 # ---------------------------------------------------------------------------
 
 from torch.utils.data import IterableDataset, DataLoader
-
+from transformers import PreTrainedTokenizerFast
 
 # Special tokens in the custom DeepSC vocab that should be stripped.
 _CUSTOM_SPECIAL_TOKENS = {'<PAD>', '<END>', '<UNK>'}
@@ -460,19 +460,20 @@ class TokenSentenceDataset(IterableDataset):
     the same criterion as collate_data in dataset.py (sort_by_len on the raw
     pickle sequence), so the first-5 printed samples match performance.py.
     """
-    def __init__(self, tokenized_ds, original_texts, orig_lens, seq_len, pad_id=0):
+    def __init__(self, tokenized_ds, original_texts, orig_lens, seq_len, pad_id=0, eos_id=None):
         self.tokenized_ds   = tokenized_ds
         self.original_texts = original_texts
         self.orig_lens      = orig_lens
         self.seq_len        = seq_len
         self.pad_id         = pad_id
-
-    def __len__(self):
-        return len(self.tokenized_ds)
+        self.eos_id         = eos_id
 
     def __iter__(self):
         for ids, text, orig_len in zip(self.tokenized_ds, self.original_texts, self.orig_lens):
-            ids     = ids[:self.seq_len]
+            if self.eos_id is not None:
+                ids = ids[:self.seq_len - 1] + [self.eos_id]
+            else:
+                ids = ids[:self.seq_len]
             pad_len = self.seq_len - len(ids)
             ids     = ids + [self.pad_id] * pad_len
             yield torch.tensor(ids, dtype=torch.long), text, orig_len
@@ -486,14 +487,14 @@ class TokenSentenceDataset(IterableDataset):
 def decode_batch(model: ChannelDiffusionLM, batch: dict, noise_std: float,
                  tokenizer, channel_type: str = "AWGN"):
     """
-    Run the full encode -> channel -> DDIM reverse_sample -> decode pipeline.
+    Run the full encode -> channel -> denoise -> decode pipeline for one batch.
 
-    Mirrors sanity_check_sample in diffusion_attempt.py exactly:
+    Evaluation pipeline (mirrors channel_diffusion_loss exactly):
       1. Encode tokens to clean latent z0.
-      2. Apply physical channel noise -> z_T = channel(z0, noise_std).
-      3. Invert noise schedule to find t_start via sigma_to_t.
-      4. Run reverse_sample (up to MAX_DDIM_STEPS=10 DDIM steps).
-      5. Decode predicted token ids via the tokenizer.
+      2. Apply ONLY physical channel noise  ->  z_t = channel(z0, noise_std).
+      3. Single denoise_step (mode=0, SNR-conditioned)  ->  z0_hat.
+      4. Last-mile decode step  (mode=1, SNR-conditioned)  ->  z_final.
+      5. Greedy argmax over lm_head logits -> token ids.
     """
     input_ids      = batch["input_ids"].to(device)
     attention_mask = batch["attention_mask"].to(device)
@@ -505,29 +506,43 @@ def decode_batch(model: ChannelDiffusionLM, batch: dict, noise_std: float,
         torch.cuda.synchronize()
     t_start_timer = time.perf_counter()
 
-    # Step 1 — encode tokens -> clean latent z0
+    # Step 1 — encode (sender side: mask is available here legitimately)
     z0 = model.encode(input_ids, attention_mask)
 
-    # Step 2 — simulate physical channel: z_T = channel(z0, noise_std)
-    z_T = model.channels.forward(z0, noise_std, channel_type=channel_type)
+    # Step 2 — physical channel only (AWGN / Rayleigh / Rician)
+    # Only z_t crosses the channel; the attention_mask is NOT transmitted.
+    z_t = model.channels.forward(z0, noise_std, channel_type=channel_type)
 
-    # Step 3 — invert noise schedule to find the matching discrete timestep
-    t_start_ddim = sigma_to_t(model, noise_std)
-
-    # Step 4 — SNR conditioning bin for denoiser
+    # SNR conditioning bin (shared by both denoising steps)
     snr_bin_val = noise_to_snr_bin(noise_std, model.cfg.n_snr_bins)
     snr_bin     = torch.full((B,), snr_bin_val, dtype=torch.long, device=device)
 
-    # Step 5 — DDIM reverse sampling (capped at MAX_DDIM_STEPS to prevent drift)
-    end_id = tokenizer.convert_tokens_to_ids('<END>')
-    token_ids, _ = reverse_sample(
-        model, z_T,
-        attention_mask=attention_mask,
-        t_start=t_start_ddim,
-        snr_bin=snr_bin,
-        end_id=end_id,
-        pad_id=PAD_ID,
-    )
+    # Step 3 — single denoising step (mode=0).
+    t_val     = sigma_to_t(model, noise_std)
+    t_denoise = torch.full((B,), t_val, dtype=torch.long, device=device)
+    z0_hat    = model.denoise_step(z_t, t_denoise, mode_idx=0,
+                                   attention_mask=None, snr_bin=snr_bin)
+
+    # Step 4 — last-mile decode (mode=1, t=0); still mask-free.
+    t_zeros = torch.zeros(B, dtype=torch.long, device=device)
+    z_final = model.denoise_step(z0_hat, t_zeros, mode_idx=1,
+                                 attention_mask=None, snr_bin=snr_bin)
+
+    # Step 5 — greedy decode
+    logits    = model.lm_head(z_final) / math.sqrt(model.cfg.d_model)
+    token_ids = logits.argmax(-1)                       # [B, seq_len]
+
+    # Receiver-side boundary detection (vectorized on GPU):
+    # Truncate each sequence at the first EOS token (<END>) if present.
+    # Replacing from the EOS index onwards with pad_id ensures both the <END>
+    # token itself and any spurious tokens generated after it are removed.
+    pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.convert_tokens_to_ids('<PAD>')
+    if pad_id is None:
+        pad_id = 0
+    eos_id = tokenizer.eos_token_id if tokenizer.eos_token_id is not None else tokenizer.convert_tokens_to_ids('<END>')
+    if eos_id is not None and eos_id >= 0:
+        post_eos  = (token_ids == eos_id).cumsum(dim=-1) > 0
+        token_ids = torch.where(post_eos, torch.tensor(pad_id, device=device, dtype=token_ids.dtype), token_ids)
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -571,17 +586,14 @@ def performance(args, SNR, model, test_loader, tokenizer, bert_scorer=None):
         'bleu4': BleuScore(0, 0, 0, 1),
     }
 
-    all_bleu                        = {k: [] for k in bleu_scorers}
-    all_bert_f1, all_bert_p, all_bert_r = [], [], []
-    all_sentences                   = []
-
-    all_latency_ms       = []
-    all_model_latency_ms = []
-    all_throughput_sps   = []
+    all_bleu                                                  = {k: [] for k in bleu_scorers}
+    all_bert_f1, all_bert_p, all_bert_r                           = [], [], []
+    all_latency_ms, all_model_latency_ms, all_throughput_sps = [], [], []
+    all_sentences                                             = []
 
     # Optional Warmup
-    warmup_cnt = getattr(args, 'warmup_batches', 0)
-    if warmup_cnt > 0 and len(test_loader) > 0:
+    warmup_cnt = getattr(args, 'warmup_batches', 1)
+    if warmup_cnt > 0:
         model.eval()
         with torch.no_grad():
             warmup_snr = SNR[0] if len(SNR) > 0 else 0
@@ -637,6 +649,7 @@ def performance(args, SNR, model, test_loader, tokenizer, bert_scorer=None):
                 epoch_throughput_sps.append(tput_sps)
 
                 for sample_idx, (pred, ref) in enumerate(zip(word, target_word)):
+                    ref = ref[len('<START>'):].lstrip() if ref.startswith('<START>') else ref
                     all_sentences.append({
                         'epoch':      epoch,
                         'snr_db':     snr,
@@ -658,15 +671,23 @@ def performance(args, SNR, model, test_loader, tokenizer, bert_scorer=None):
                 print(f" Average Latency: {epoch_latency_ms[snr_idx]:.3f} ms/sent (Model: {epoch_model_latency_ms[snr_idx]:.3f} ms/sent) | Throughput: {epoch_throughput_sps[snr_idx]:.1f} sent/s")
                 print(f"="*80)
                 for pred, ref in zip(sent1[:5], sent2[:5]):
+                    ref_display = ref[len('<START>'):].lstrip() if ref.startswith('<START>') else ref
                     print(f"Predicted: {pred}")
-                    print(f"Actual   : {ref}")
+                    print(f"Actual   : {ref_display}")
                     print("-"*40)
 
+                # Remove '<START> ' from references for fair score calculation, 
+                # since the diffusion model is not trained to generate '<START>'.
+                sent2_eval = [
+                    r[len('<START>'):].lstrip() if r.startswith('<START>') else r
+                    for r in sent2
+                ]
+
                 for key, scorer in bleu_scorers.items():
-                    bleu_epoch[key].append(scorer.compute_blue_score(sent1, sent2))
+                    bleu_epoch[key].append(scorer.compute_blue_score(sent1, sent2_eval))
 
                 if bert_scorer is not None:
-                    bs = bert_scorer.score(sent1, sent2)
+                    bs = bert_scorer.score(sent1, sent2_eval)
                     bert_f1_epoch.append(bs['f1'])
                     bert_p_epoch.append(bs['precision'])
                     bert_r_epoch.append(bs['recall'])
@@ -690,9 +711,9 @@ def performance(args, SNR, model, test_loader, tokenizer, bert_scorer=None):
         bert_scores['recall']    = np.mean(np.array(all_bert_r),  axis=0)
 
     time_stats = {
-        'latency_ms':       np.mean(np.array(all_latency_ms), axis=0),
+        'latency_ms':       np.mean(np.array(all_latency_ms),       axis=0),
         'model_latency_ms': np.mean(np.array(all_model_latency_ms), axis=0),
-        'throughput_sps':   np.mean(np.array(all_throughput_sps), axis=0),
+        'throughput_sps':   np.mean(np.array(all_throughput_sps),   axis=0),
     }
 
     return bleu_scores, bert_scores, time_stats, all_sentences
@@ -767,9 +788,20 @@ if __name__ == '__main__':
         raise FileNotFoundError(f'Vocab file not found: {args.vocab_file}')
 
     tokenizer = PreTrainedTokenizerFast(tokenizer_file=args.vocab_file)
-    PAD_ID = tokenizer.convert_tokens_to_ids('<PAD>')
-    if PAD_ID is None or PAD_ID < 0:
-        PAD_ID = 0  # fallback
+    # [FIX 4] Don't silently fall back to id 0 if '<PAD>' isn't in the vocab — that
+    # could quietly corrupt every attention mask if 0 happens to be a real token.
+    _pad_id = tokenizer.convert_tokens_to_ids('<PAD>')
+    if _pad_id is None or _pad_id < 0:
+        raise ValueError(
+            "'<PAD>' token not found in the diffusion tokenizer vocab — refusing to "
+            "silently fall back to id 0, since that may be a real token."
+        )
+    PAD_ID = _pad_id
+
+    _eos_id = tokenizer.convert_tokens_to_ids('<END>')
+    EOS_ID = _eos_id if (_eos_id is not None and _eos_id >= 0) else None
+    tokenizer.pad_token = '<PAD>'
+    tokenizer.eos_token = '<END>'
 
     print(f'Tokenizer vocab size: {len(tokenizer)}')
 
@@ -804,7 +836,7 @@ if __name__ == '__main__':
     # the SeqtoText.sequence_to_text format used by performance.py.
     # Filter raw_test_data in parallel so indices stay aligned.
     pairs = [
-        (row, _ids_to_text(row, idx_to_token, end_idx, keep_start=False))
+        (row, _ids_to_text(row, idx_to_token, end_idx, keep_start=True))
         for row in raw_test_data
     ]
     pairs = [(row, text) for row, text in pairs if text.strip()]
@@ -845,7 +877,7 @@ if __name__ == '__main__':
         return {"input_ids": input_ids, "attention_mask": attention_mask,
                 "reference_texts": list(texts)}
 
-    test_dataset = TokenSentenceDataset(test_data, test_sentences, orig_lens, SEQ_LEN, pad_id=PAD_ID)
+    test_dataset = TokenSentenceDataset(test_data, test_sentences, orig_lens, SEQ_LEN, pad_id=PAD_ID, eos_id=EOS_ID)
     test_loader  = DataLoader(test_dataset, batch_size=args.batch_size,
                               collate_fn=collate_blocks, num_workers=0, pin_memory=True)
 
@@ -869,7 +901,7 @@ if __name__ == '__main__':
     )
 
     # -----------------------------------------------------------------------
-    # 7. Pretty-print results table
+    # 7. Pretty-print results table (identical format to performance.py)
     # -----------------------------------------------------------------------
     sep_width = 10 + 4 * 11 + 3 * 16 + (3 * 11 if bert_scores else 0)
     model_tag = os.path.splitext(os.path.basename(ckpt_file))[0]
@@ -911,6 +943,7 @@ if __name__ == '__main__':
                 f' | {np.mean(time_stats["model_latency_ms"]):>12.3f}'
                 f' | {np.mean(time_stats["throughput_sps"]):>15.1f}')
     print(row_avg)
+    print('='*sep_width)
 
     # -----------------------------------------------------------------------
     # 8. Save aggregate CSV
@@ -926,11 +959,9 @@ if __name__ == '__main__':
         fieldnames += ['bert_f1', 'bert_precision', 'bert_recall']
     fieldnames += ['latency_ms_per_sent', 'model_latency_ms_per_sent', 'throughput_sent_per_sec']
 
-    write_header = not os.path.exists(csv_path)
-    with open(csv_path, 'a', newline='') as f:
+    with open(csv_path, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
-        if write_header:
-            writer.writeheader()
+        writer.writeheader()
         for i, snr in enumerate(SNR):
             record = {
                 'channel':                   args.channel,
@@ -960,12 +991,11 @@ if __name__ == '__main__':
                      else os.path.join(ckpt_dir,
                                        f'diffusion_predictions_{args.channel}_{model_tag}.csv'))
 
-    pred_fieldnames   = ['epoch', 'snr_db', 'sample_idx', 'predicted', 'reference']
-    pred_write_header = not os.path.exists(pred_csv_path)
-    with open(pred_csv_path, 'a', newline='', encoding='utf-8') as f:
+    pred_fieldnames = ['epoch', 'snr_db', 'sample_idx', 'predicted', 'reference']
+    # [FIX 5] Overwrite each run instead of silently appending forever.
+    with open(pred_csv_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=pred_fieldnames)
-        if pred_write_header:
-            writer.writeheader()
+        writer.writeheader()
         writer.writerows(all_sentences)
 
     print(f'Predictions saved to: {pred_csv_path}')

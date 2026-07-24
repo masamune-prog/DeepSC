@@ -1,6 +1,14 @@
 torch
+numpy
 nltk
 w3lib
 tqdm
 scikit-learn
-bert4keras>=0.4.6
+bert4keras
+transformers
+tokenizers
+datasets
+sentence-transformers
+bert-score
+matplotlib
+pandas
