@@ -238,15 +238,14 @@ if __name__ == '__main__':
         start_idx = token_to_idx['<START>']
         end_idx = token_to_idx['<END>']
 
-        collate_fn = collate_data
-
         enc_layers = args.num_layers if args.num_layers is not None else args.num_enc_layers
         dec_layers = args.num_layers if args.num_layers is not None else args.num_dec_layers
+        max_seq_len = max(num_vocab, args.MAX_LENGTH)
         deepsc = DeepSC(enc_layers, num_vocab, num_vocab,
-                        num_vocab, num_vocab, args.d_model, args.num_heads,
+                        max_seq_len, max_seq_len, args.d_model, args.num_heads,
                         args.dff, 0.1).to(device)
         if dec_layers != enc_layers:
-            deepsc.decoder = Decoder(dec_layers, num_vocab, num_vocab,
+            deepsc.decoder = Decoder(dec_layers, num_vocab, max_seq_len,
                                      args.d_model, args.num_heads, args.dff, 0.1).to(device)
 
     mi_net = Mine().to(device)

@@ -27,6 +27,14 @@ with the fixed training script is evaluated the way it was actually trained:
   5. Both output CSVs were opened in append mode unconditionally, so re-running the
      same channel/checkpoint after a fix (like this one) silently doubles up rows
      rather than overwriting. Now overwrites each run.
+  6. encode() and denoise_step() now zero out padded positions (ported from FIX 9 in
+     diffusion_attempt.py) so the self-contained model copy matches training exactly.
+  7. [REALISM] decode_batch() is now fully realistic: the attention_mask is NOT
+     transmitted over the channel. The receiver-side denoiser steps receive no mask
+     whatsoever. Sequence boundaries are recovered purely from predicted EOS (<END>)
+     tokens — the receiver scans its own output and stops/truncates at the first EOS
+     position.  This is consistent with the training objective (the model is trained
+     to predict EOS tokens at the correct boundary position).
 
   - Uses the SAME fixed test split (txt/test_data.pkl) as performance.py
   - BLEU-1 through BLEU-4 (sentence-level)
@@ -294,7 +302,12 @@ class ChannelDiffusionLM(nn.Module):
         x = self.drop(self.tok_emb(input_ids) + self.pos_emb(pos))
         src_key_padding_mask = None if attention_mask is None else ~attention_mask
         x = self.encoder(x, src_key_padding_mask=src_key_padding_mask)
-        return self.z_ln(x)
+        z0 = self.z_ln(x)
+        # [FIX 6 / ported from training FIX 9] Zero out padded positions so their
+        # encoder outputs don't propagate into the channel or denoiser.
+        if attention_mask is not None:
+            z0 = z0 * attention_mask.unsqueeze(-1).float()
+        return z0
 
     def denoise_step(self, z_t, t, mode_idx=0, attention_mask=None, snr_bin=None):
         B, L, D = z_t.shape
@@ -303,13 +316,25 @@ class ChannelDiffusionLM(nn.Module):
         m_emb = self.mode_emb(modes).unsqueeze(1)
         pos   = torch.arange(L, device=z_t.device).unsqueeze(0)
         p_emb = self.pos_emb(pos)
+        # [FIX 6 / ported from training FIX 9] Zero channel-corrupted pad noise
+        # before adding time/mode conditioning.
+        if attention_mask is not None:
+            z_t = z_t * attention_mask.unsqueeze(-1).float()
         x     = z_t + t_emb + m_emb + p_emb
         if snr_bin is not None:
             s_emb = self.snr_emb(snr_bin).unsqueeze(1)  # [B, 1, D]
             x = x + s_emb
+        # [FIX 6 / ported from training FIX 9] Zero again after conditioning so
+        # the added embeddings don't pollute masked slots.
+        if attention_mask is not None:
+            x = x * attention_mask.unsqueeze(-1).float()
         src_key_padding_mask = None if attention_mask is None else ~attention_mask
         x = self.denoiser(x, src_key_padding_mask=src_key_padding_mask)
-        return self.ln_f(x)
+        z0_hat = self.ln_f(x)
+        # [FIX 6 / ported from training FIX 9] Zero padded output positions.
+        if attention_mask is not None:
+            z0_hat = z0_hat * attention_mask.unsqueeze(-1).float()
+        return z0_hat
 
     def forward(self, input_ids, t, mode_idx=0, attention_mask=None, channel_type=None,
                 snr_bin=None):
@@ -489,12 +514,18 @@ def decode_batch(model: ChannelDiffusionLM, batch: dict, noise_std: float,
     """
     Run the full encode -> channel -> denoise -> decode pipeline for one batch.
 
-    Evaluation pipeline (mirrors channel_diffusion_loss exactly):
-      1. Encode tokens to clean latent z0.
-      2. Apply ONLY physical channel noise  ->  z_t = channel(z0, noise_std).
-      3. Single denoise_step (mode=0, SNR-conditioned)  ->  z0_hat.
-      4. Last-mile decode step  (mode=1, SNR-conditioned)  ->  z_final.
+    Realistic evaluation pipeline — the attention_mask is NEVER transmitted:
+      1. Encode tokens to clean latent z0  (sender has mask: used for encode only).
+      2. Transmit ONLY z_t = channel(z0, noise_std) over the physical channel.
+         The attention_mask stays at the sender and is not sent.
+      3. Receiver: single denoise_step (mode=0, SNR-conditioned, NO mask).
+      4. Receiver: last-mile decode step (mode=1, t=0, SNR-conditioned, NO mask).
       5. Greedy argmax over lm_head logits -> token ids.
+      6. [FIX 7] Receiver-side EOS detection: scan predicted token_ids for the
+         first <END> token and truncate there.  This is the ONLY mechanism by
+         which the receiver learns where the sentence ends — no side-channel mask
+         information is used.  Consistent with the training objective that trains
+         the model to predict EOS at the correct boundary position.
     """
     input_ids      = batch["input_ids"].to(device)
     attention_mask = batch["attention_mask"].to(device)
@@ -506,24 +537,28 @@ def decode_batch(model: ChannelDiffusionLM, batch: dict, noise_std: float,
         torch.cuda.synchronize()
     t_start_timer = time.perf_counter()
 
-    # Step 1 — encode (sender side: mask is available here legitimately)
+    # Step 1 — encode (sender side: mask is available here legitimately, since
+    # the sender knows its own padding boundaries).
     z0 = model.encode(input_ids, attention_mask)
 
-    # Step 2 — physical channel only (AWGN / Rayleigh / Rician)
+    # Step 2 — physical channel only (AWGN / Rayleigh / Rician).
     # Only z_t crosses the channel; the attention_mask is NOT transmitted.
+    # The receiver has no knowledge of which positions are real vs. padding.
     z_t = model.channels.forward(z0, noise_std, channel_type=channel_type)
 
-    # SNR conditioning bin (shared by both denoising steps)
+    # SNR conditioning bin (both sides know the operating SNR from a control channel)
     snr_bin_val = noise_to_snr_bin(noise_std, model.cfg.n_snr_bins)
     snr_bin     = torch.full((B,), snr_bin_val, dtype=torch.long, device=device)
 
-    # Step 3 — single denoising step (mode=0).
+    # Step 3 — single denoising step (mode=0), receiver side.
+    # attention_mask=None: receiver has no access to the sender's padding mask.
     t_val     = sigma_to_t(model, noise_std)
     t_denoise = torch.full((B,), t_val, dtype=torch.long, device=device)
     z0_hat    = model.denoise_step(z_t, t_denoise, mode_idx=0,
                                    attention_mask=None, snr_bin=snr_bin)
 
-    # Step 4 — last-mile decode (mode=1, t=0); still mask-free.
+    # Step 4 — last-mile decode (mode=1, t=0), receiver side.
+    # attention_mask=None: same reasoning — no mask transmitted.
     t_zeros = torch.zeros(B, dtype=torch.long, device=device)
     z_final = model.denoise_step(z0_hat, t_zeros, mode_idx=1,
                                  attention_mask=None, snr_bin=snr_bin)
@@ -532,17 +567,26 @@ def decode_batch(model: ChannelDiffusionLM, batch: dict, noise_std: float,
     logits    = model.lm_head(z_final) / math.sqrt(model.cfg.d_model)
     token_ids = logits.argmax(-1)                       # [B, seq_len]
 
-    # Receiver-side boundary detection (vectorized on GPU):
-    # Truncate each sequence at the first EOS token (<END>) if present.
-    # Replacing from the EOS index onwards with pad_id ensures both the <END>
-    # token itself and any spurious tokens generated after it are removed.
-    pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.convert_tokens_to_ids('<PAD>')
+    # Step 6 — [FIX 7] Receiver-side EOS-based boundary detection.
+    # The receiver scans its own predicted token_ids for the first <END> token.
+    # Everything from that position onwards (inclusive) is replaced with <PAD>,
+    # so the decoder only sees the recovered sentence content.
+    # This is the ONLY information the receiver uses to determine sequence length —
+    # no attention_mask side-channel is involved.
+    pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None \
+             else tokenizer.convert_tokens_to_ids('<PAD>')
     if pad_id is None:
         pad_id = 0
-    eos_id = tokenizer.eos_token_id if tokenizer.eos_token_id is not None else tokenizer.convert_tokens_to_ids('<END>')
+    eos_id = tokenizer.eos_token_id if tokenizer.eos_token_id is not None \
+             else tokenizer.convert_tokens_to_ids('<END>')
     if eos_id is not None and eos_id >= 0:
+        # cumsum trick: once <END> is seen, all subsequent positions become True
         post_eos  = (token_ids == eos_id).cumsum(dim=-1) > 0
-        token_ids = torch.where(post_eos, torch.tensor(pad_id, device=device, dtype=token_ids.dtype), token_ids)
+        token_ids = torch.where(
+            post_eos,
+            torch.tensor(pad_id, device=device, dtype=token_ids.dtype),
+            token_ids,
+        )
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()

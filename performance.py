@@ -25,7 +25,7 @@ parser.add_argument('--data-dir', default='txt/train_data.pkl', type=str)
 parser.add_argument('--vocab-file', default='txt/vocab.json', type=str)
 parser.add_argument('--checkpoint-path', default='checkpoints/deepsc-Rayleigh', type=str)
 parser.add_argument('--channel', default='Rayleigh', type=str)
-parser.add_argument('--MAX-LENGTH', default=30, type=int)
+parser.add_argument('--MAX-LENGTH', default=256, type=int)
 parser.add_argument('--MIN-LENGTH', default=4, type=int)
 parser.add_argument('--d-model', default=128, type=int)
 parser.add_argument('--dff', default=512, type=int)
@@ -47,6 +47,8 @@ parser.add_argument('--predictions-csv', default=None, type=str,
                          'Defaults to predictions_<channel>_<model>.csv in the checkpoint directory.')
 parser.add_argument('--warmup-batches', default=2, type=int,
                     help='Number of warmup batches before measuring inference time')
+parser.add_argument('--fp16', action='store_true',
+                    help='Use FP16 (half precision) for model inference and computation')
 # BERT encoder options
 parser.add_argument('--use-bert-encoder', action='store_true',
                     help='Use the BERT encoder variant of DeepSC')
@@ -280,7 +282,7 @@ def performance(args, SNR, net, collate_fn, decode_fn, bert_scorer=None):
                 snr_model_total_time = 0.0
                 snr_total_samples    = 0
 
-                for sents in test_iterator:
+                for sents in tqdm(test_iterator, desc=f'SNR {snr}dB', leave=False):
                     predicted, references, t_info = decode_fn(net, sents, noise_std)
                     word += predicted
                     target_word += references
@@ -381,7 +383,7 @@ def performance(args, SNR, net, collate_fn, decode_fn, bert_scorer=None):
 # ---------------------------------------------------------------------------
 
 def greedy_decode_timed(model, src, n_var, max_len, padding_idx, start_symbol, channel,
-                        attention_mask=None):
+                        attention_mask=None, use_fp16=False, end_symbol=None):
     """Greedy (argmax) decoder with per-step timing breakdown.
 
     Steps timed:
@@ -399,7 +401,8 @@ def greedy_decode_timed(model, src, n_var, max_len, padding_idx, start_symbol, c
         'ar_loop': 0.0,
     }
     channels = Channels()
-
+    #autocast_ctx = torch.cuda.amp.autocast(enabled=use_fp16, dtype=torch.float16) if torch.cuda.is_available() else torch.no_grad()
+    autocast_ctx = torch.no_grad()
     # --- Step 1: GPU Data Prep & Transfer ---
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -421,13 +424,14 @@ def greedy_decode_timed(model, src, n_var, max_len, padding_idx, start_symbol, c
     timing_breakdown['data_prep'] = t1 - t0
 
     # --- Step 2: Encoder & Power Normalization ---
-    if model.use_bert_encoder:
-        enc_output = model.encoder(src_input_ids, attention_mask=src_attn_mask)
-    else:
-        enc_output = model.encoder(src_input_ids, src_mask)
+    with autocast_ctx:
+        if model.use_bert_encoder:
+            enc_output = model.encoder(src_input_ids, attention_mask=src_attn_mask)
+        else:
+            enc_output = model.encoder(src_input_ids, src_mask)
 
-    channel_enc_output = model.channel_encoder(enc_output)
-    Tx_sig = PowerNormalize(channel_enc_output)
+        channel_enc_output = model.channel_encoder(enc_output)
+        Tx_sig = PowerNormalize(channel_enc_output)
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -435,14 +439,15 @@ def greedy_decode_timed(model, src, n_var, max_len, padding_idx, start_symbol, c
     timing_breakdown['encoder'] = t2 - t1
 
     # --- Step 3: Physical Channel Simulation ---
-    if channel == 'AWGN':
-        Rx_sig = channels.AWGN(Tx_sig, n_var)
-    elif channel == 'Rayleigh':
-        Rx_sig = channels.Rayleigh(Tx_sig, n_var)
-    elif channel == 'Rician':
-        Rx_sig = channels.Rician(Tx_sig, n_var)
-    else:
-        raise ValueError("Please choose from AWGN, Rayleigh, and Rician")
+    with autocast_ctx:
+        if channel == 'AWGN':
+            Rx_sig = channels.AWGN(Tx_sig, n_var)
+        elif channel == 'Rayleigh':
+            Rx_sig = channels.Rayleigh(Tx_sig, n_var)
+        elif channel == 'Rician':
+            Rx_sig = channels.Rician(Tx_sig, n_var)
+        else:
+            raise ValueError("Please choose from AWGN, Rayleigh, and Rician")
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -450,7 +455,8 @@ def greedy_decode_timed(model, src, n_var, max_len, padding_idx, start_symbol, c
     timing_breakdown['channel_sim'] = t3 - t2
 
     # --- Step 4: Channel Decoder ---
-    memory = model.channel_decoder(Rx_sig)
+    with autocast_ctx:
+        memory = model.channel_decoder(Rx_sig)
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -460,18 +466,20 @@ def greedy_decode_timed(model, src, n_var, max_len, padding_idx, start_symbol, c
     # --- Step 5: Autoregressive Decoder Loop ---
     outputs = torch.ones(src_input_ids.size(0), 1).fill_(start_symbol).type_as(src_input_ids.data)
 
-    for i in range(max_len - 1):
-        trg_mask = (outputs == padding_idx).unsqueeze(-2).type(torch.FloatTensor)
-        look_ahead_mask = subsequent_mask(outputs.size(1)).type(torch.FloatTensor)
-        combined_mask = torch.max(trg_mask, look_ahead_mask)
-        combined_mask = combined_mask.to(device)
+    with autocast_ctx:
+        for i in range(max_len - 1):
+            if end_symbol is not None and (outputs == end_symbol).any(dim=1).all():
+                break
+            trg_mask = (outputs == padding_idx).unsqueeze(-2).type(torch.FloatTensor)
+            look_ahead_mask = subsequent_mask(outputs.size(1)).type(torch.FloatTensor)
+            combined_mask = torch.max(trg_mask, look_ahead_mask)
+            combined_mask = combined_mask.to(device)
 
-        dec_output = model.decoder(outputs, memory, combined_mask, src_mask)
-        pred = model.dense(dec_output)
+            dec_output = model.decoder(outputs, memory, combined_mask, src_mask)
+            pred_last = model.dense(dec_output[:, -1:, :])
 
-        prob = pred[:, -1:, :]
-        _, next_word = torch.max(prob, dim=-1)
-        outputs = torch.cat([outputs, next_word], dim=1)
+            _, next_word = torch.max(pred_last, dim=-1)
+            outputs = torch.cat([outputs, next_word], dim=1)
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -482,12 +490,12 @@ def greedy_decode_timed(model, src, n_var, max_len, padding_idx, start_symbol, c
 
 
 def _decode_custom(net, sents, noise_std,
-                   StoT, pad_idx, start_idx, channel, max_length):
+                   StoT, pad_idx, start_idx, channel, max_length, use_fp16=False):
     """Decode a batch using the custom-vocab encoder."""
     B = sents.size(0)
 
     out, breakdown = greedy_decode_timed(
-        net, sents, noise_std, max_length, pad_idx, start_idx, channel
+        net, sents, noise_std, max_length, pad_idx, start_idx, channel, use_fp16=use_fp16, end_symbol=StoT.end_idx
     )
 
     if torch.cuda.is_available():
@@ -518,7 +526,7 @@ def _decode_custom(net, sents, noise_std,
 
 
 def _decode_bert(net, sents, noise_std,
-                 bert_tokenizer, pad_idx, start_idx, channel, max_length):
+                 bert_tokenizer, pad_idx, start_idx, channel, max_length, use_fp16=False):
     """Decode a batch using the BERT encoder."""
     input_ids = sents['input_ids']
     attention_mask = sents['attention_mask']
@@ -526,7 +534,7 @@ def _decode_bert(net, sents, noise_std,
 
     out, breakdown = greedy_decode_timed(
         net, input_ids, noise_std, max_length, pad_idx, start_idx, channel,
-        attention_mask=attention_mask
+        attention_mask=attention_mask, use_fp16=use_fp16, end_symbol=bert_tokenizer.sep_token_id
     )
 
     if torch.cuda.is_available():
@@ -665,6 +673,7 @@ if __name__ == '__main__':
             start_idx=start_idx,
             channel=args.channel,
             max_length=args.MAX_LENGTH,
+            use_fp16=args.fp16,
         )
 
         deepsc = DeepSC(
@@ -691,6 +700,31 @@ if __name__ == '__main__':
         start_idx  = token_to_idx['<START>']
         end_idx    = token_to_idx['<END>']
 
+        # Auto-detect vocab size and max length from checkpoint if present
+        src_vocab_size = num_vocab
+        trg_vocab_size = num_vocab
+        src_max_len = num_vocab
+        trg_max_len = num_vocab
+
+        if 'encoder.embedding.weight' in ckpt_state:
+            ckpt_vocab_size = ckpt_state['encoder.embedding.weight'].shape[0]
+            if ckpt_vocab_size != num_vocab:
+                print(f'[INFO] Overriding encoder vocab size from checkpoint: {ckpt_vocab_size} (vocab file had {num_vocab})')
+                src_vocab_size = ckpt_vocab_size
+
+        if 'decoder.embedding.weight' in ckpt_state:
+            ckpt_trg_vocab = ckpt_state['decoder.embedding.weight'].shape[0]
+            if ckpt_trg_vocab != num_vocab:
+                trg_vocab_size = ckpt_trg_vocab
+
+        if 'encoder.pos_encoding.pe' in ckpt_state:
+            ckpt_src_len = ckpt_state['encoder.pos_encoding.pe'].shape[1]
+            src_max_len = ckpt_src_len
+
+        if 'decoder.pos_encoding.pe' in ckpt_state:
+            ckpt_trg_len = ckpt_state['decoder.pos_encoding.pe'].shape[1]
+            trg_max_len = ckpt_trg_len
+
         StoT = SeqtoText(token_to_idx, end_idx)
         collate_fn = collate_data
 
@@ -701,22 +735,30 @@ if __name__ == '__main__':
             start_idx=start_idx,
             channel=args.channel,
             max_length=args.MAX_LENGTH,
+            use_fp16=args.fp16,
         )
 
         # DeepSC constructor uses num_layers for both encoder and decoder, so
         # we build it with enc_num_layers and then patch the decoder if needed.
-        deepsc = DeepSC(enc_num_layers, num_vocab, num_vocab,
-                        num_vocab, num_vocab, args.d_model, args.num_heads,
+        deepsc = DeepSC(enc_num_layers, src_vocab_size, trg_vocab_size,
+                        src_max_len, trg_max_len, args.d_model, args.num_heads,
                         args.dff, 0.1).to(device)
 
         if dec_num_layers != enc_num_layers:
             # Rebuild decoder with the correct depth.
             from models.transceiver import Decoder
-            deepsc.decoder = Decoder(dec_num_layers, num_vocab, num_vocab,
+            deepsc.decoder = Decoder(dec_num_layers, trg_vocab_size, trg_vocab_size,
                                      args.d_model, args.num_heads, args.dff, 0.1).to(device)
 
     # Load weights into the freshly constructed model.
     deepsc.load_state_dict(ckpt_state)
+    if args.fp16:
+        if device.type == 'cuda':
+            print('[INFO] Converting model to FP16 (half precision)...')
+            deepsc = deepsc.half()
+        else:
+            print('[WARNING] FP16 was requested but CUDA is not available. Proceeding with FP32.')
+
     print('Model loaded from:', model_path)
     pipeline_timings['2. Model Construction & Weight Load'] = time.perf_counter() - t_step2
 

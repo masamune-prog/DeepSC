@@ -45,56 +45,105 @@ class PositionalEncoding(nn.Module):
         x = self.dropout(x)
         return x
   
+# class MultiHeadedAttention(nn.Module):
+#     def __init__(self, num_heads, d_model, dropout=0.1):
+#         "Take in model size and number of heads."
+#         super(MultiHeadedAttention, self).__init__()
+#         assert d_model % num_heads == 0
+#         # We assume d_v always equals d_k
+#         self.d_k = d_model // num_heads
+#         self.num_heads = num_heads
+        
+#         self.wq = nn.Linear(d_model, d_model)
+#         self.wk = nn.Linear(d_model, d_model)
+#         self.wv = nn.Linear(d_model, d_model)
+        
+#         self.dense = nn.Linear(d_model, d_model)
+        
+#         #self.linears = clones(nn.Linear(d_model, d_model), 4)
+#         self.attn = None
+#         self.dropout = nn.Dropout(p=dropout)
+        
+#     def forward(self, query, key, value, mask=None):
+#         "Implements Figure 2"
+#         if mask is not None:
+#             # Same mask applied to all h heads.
+#             mask = mask.unsqueeze(1)
+#         nbatches = query.size(0)
+        
+#         # 1) Do all the linear projections in batch from d_model => h x d_k 
+#         query = self.wq(query).view(nbatches, -1, self.num_heads, self.d_k)
+#         query = query.transpose(1, 2)
+        
+#         key = self.wk(key).view(nbatches, -1, self.num_heads, self.d_k)
+#         key = key.transpose(1, 2)
+        
+#         value = self.wv(value).view(nbatches, -1, self.num_heads, self.d_k)
+#         value = value.transpose(1, 2)
+        
+#         #        query, key, value = \
+#         #            [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
+#         #             for l, x in zip(self.linears, (query, key, value))]
+        
+#         # 2) Apply attention on all the projected vectors in batch. 
+#         x, self.attn = self.attention(query, key, value, mask=mask)
+        
+#         # 3) "Concat" using a view and apply a final linear. 
+#         x = x.transpose(1, 2).contiguous() \
+#              .view(nbatches, -1, self.num_heads * self.d_k)
+             
+#         x = self.dense(x)
+#         x = self.dropout(x)
+        
+#         return x
+#replace with more memory efficient implementation 
 class MultiHeadedAttention(nn.Module):
     def __init__(self, num_heads, d_model, dropout=0.1):
-        "Take in model size and number of heads."
         super(MultiHeadedAttention, self).__init__()
         assert d_model % num_heads == 0
-        # We assume d_v always equals d_k
         self.d_k = d_model // num_heads
         self.num_heads = num_heads
-        
+
         self.wq = nn.Linear(d_model, d_model)
         self.wk = nn.Linear(d_model, d_model)
         self.wv = nn.Linear(d_model, d_model)
-        
+
         self.dense = nn.Linear(d_model, d_model)
-        
-        #self.linears = clones(nn.Linear(d_model, d_model), 4)
+
         self.attn = None
+        self.dropout_p = dropout
         self.dropout = nn.Dropout(p=dropout)
-        
+
     def forward(self, query, key, value, mask=None):
-        "Implements Figure 2"
-        if mask is not None:
-            # Same mask applied to all h heads.
-            mask = mask.unsqueeze(1)
         nbatches = query.size(0)
-        
-        # 1) Do all the linear projections in batch from d_model => h x d_k 
-        query = self.wq(query).view(nbatches, -1, self.num_heads, self.d_k)
-        query = query.transpose(1, 2)
-        
-        key = self.wk(key).view(nbatches, -1, self.num_heads, self.d_k)
-        key = key.transpose(1, 2)
-        
-        value = self.wv(value).view(nbatches, -1, self.num_heads, self.d_k)
-        value = value.transpose(1, 2)
-        
-        #        query, key, value = \
-        #            [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
-        #             for l, x in zip(self.linears, (query, key, value))]
-        
-        # 2) Apply attention on all the projected vectors in batch. 
-        x, self.attn = self.attention(query, key, value, mask=mask)
-        
-        # 3) "Concat" using a view and apply a final linear. 
-        x = x.transpose(1, 2).contiguous() \
-             .view(nbatches, -1, self.num_heads * self.d_k)
-             
+
+        # 1) Linear projections, split into heads: (batch, heads, seq, d_k)
+        query = self.wq(query).view(nbatches, -1, self.num_heads, self.d_k).transpose(1, 2)
+        key   = self.wk(key).view(nbatches, -1, self.num_heads, self.d_k).transpose(1, 2)
+        value = self.wv(value).view(nbatches, -1, self.num_heads, self.d_k).transpose(1, 2)
+
+        # 2) Build the SDPA-compatible mask (bool, True = attend, broadcastable
+        #    to (batch, heads, seq_q, seq_k))
+        attn_mask = None
+        if mask is not None:
+            # original code: mask.unsqueeze(1) -> (batch, 1, seq_q, seq_k),
+            # with masked_fill(mask == 0, -1e9) meaning 0 == "block".
+            # SDPA bool convention is inverted: True == "attend".
+            attn_mask = (mask != 0).unsqueeze(1)   # (batch, 1, seq_q, seq_k), broadcasts over heads
+
+        # 3) Fused attention — no (batch, heads, seq, seq) matrix ever materialized
+        x = F.scaled_dot_product_attention(
+            query, key, value,
+            attn_mask=attn_mask,
+            dropout_p=self.dropout_p if self.training else 0.0,
+            is_causal=False,   # mask already encodes causal+padding combined, so keep this False
+        )
+
+        # 4) "Concat" heads back and project
+        x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.num_heads * self.d_k)
         x = self.dense(x)
         x = self.dropout(x)
-        
+
         return x
     
     def attention(self, query, key, value, mask=None):

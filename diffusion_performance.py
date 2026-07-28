@@ -58,6 +58,8 @@ parser.add_argument('--predictions-csv', default=None, type=str,
                     help='Path for the per-sentence predictions CSV.')
 parser.add_argument('--warmup-batches', default=2, type=int,
                     help='Number of warmup batches before measuring inference time')
+parser.add_argument('--fp16', action='store_true',
+                    help='Use FP16 (half precision) for model inference and computation')
 # BERTScore options (mirrors performance.py)
 parser.add_argument('--bert-score', action='store_true',
                     help='Compute BERTScore semantic similarity in addition to BLEU')
@@ -158,11 +160,11 @@ class Channels:
     def Rayleigh(self, Tx_sig, n_var):
         """Rayleigh flat-fading channel with per-example fading coefficients."""
         shape = Tx_sig.shape                       # [B, L, D]
-        B, device = shape[0], Tx_sig.device
+        B, device, dtype = shape[0], Tx_sig.device, Tx_sig.dtype
 
         # Per-example fading coefficients (matches diffusion_attempt.py)
-        H_real = torch.normal(0, math.sqrt(1 / 2), size=(B,), device=device)
-        H_imag = torch.normal(0, math.sqrt(1 / 2), size=(B,), device=device)
+        H_real = torch.normal(0, math.sqrt(1 / 2), size=(B,), device=device, dtype=dtype)
+        H_imag = torch.normal(0, math.sqrt(1 / 2), size=(B,), device=device, dtype=dtype)
         H = torch.stack([
             torch.stack([H_real, -H_imag], dim=-1),
             torch.stack([H_imag,  H_real], dim=-1),
@@ -171,19 +173,20 @@ class Channels:
         Tx_pairs = Tx_sig.reshape(B, -1, 2)          # [B, L*D/2, 2]
         Tx_faded = torch.bmm(Tx_pairs, H)            # [B, L*D/2, 2]
         Rx_faded = self.AWGN(Tx_faded, n_var)
-        Rx_sig   = torch.bmm(Rx_faded, torch.inverse(H)).reshape(shape)
+        H_inv = torch.inverse(H.float()).to(dtype)
+        Rx_sig   = torch.bmm(Rx_faded, H_inv).reshape(shape)
         return Rx_sig
 
     def Rician(self, Tx_sig, n_var, K=1):
         """Rician fading channel with a line-of-sight component (K factor)."""
         shape = Tx_sig.shape
-        B, device = shape[0], Tx_sig.device
+        B, device, dtype = shape[0], Tx_sig.device, Tx_sig.dtype
         mean = math.sqrt(K / (K + 1))
         std  = math.sqrt(1 / (K + 1))
 
         # Per-example fading coefficients (matches diffusion_attempt.py)
-        H_real = torch.normal(mean, std, size=(B,), device=device)
-        H_imag = torch.normal(mean, std, size=(B,), device=device)
+        H_real = torch.normal(mean, std, size=(B,), device=device, dtype=dtype)
+        H_imag = torch.normal(mean, std, size=(B,), device=device, dtype=dtype)
         H = torch.stack([
             torch.stack([H_real, -H_imag], dim=-1),
             torch.stack([H_imag,  H_real], dim=-1),
@@ -192,7 +195,8 @@ class Channels:
         Tx_pairs = Tx_sig.reshape(B, -1, 2)
         Tx_faded = torch.bmm(Tx_pairs, H)
         Rx_faded = self.AWGN(Tx_faded, n_var)
-        Rx_sig   = torch.bmm(Rx_faded, torch.inverse(H)).reshape(shape)
+        H_inv = torch.inverse(H.float()).to(dtype)
+        Rx_sig   = torch.bmm(Rx_faded, H_inv).reshape(shape)
         return Rx_sig
 
     def forward(self, Tx_sig, n_var, channel_type="AWGN", K=1):
@@ -483,16 +487,13 @@ class TokenSentenceDataset(IterableDataset):
 # ---------------------------------------------------------------------------
 
 @torch.no_grad()
-def decode_batch(model: ChannelDiffusionLM, batch: dict, noise_std: float,
-                 tokenizer, channel_type: str = "AWGN"):
+def decode_batch(model, batch, noise_std, tokenizer, channel_type="AWGN", use_fp16=False):
     """
-    Run the full encode -> channel -> DDIM reverse_sample -> decode pipeline.
-
-    Mirrors sanity_check_sample in diffusion_attempt.py exactly:
-      1. Encode tokens to clean latent z0.
-      2. Apply physical channel noise -> z_T = channel(z0, noise_std).
-      3. Invert noise schedule to find t_start via sigma_to_t.
-      4. Run reverse_sample (up to MAX_DDIM_STEPS=10 DDIM steps).
+    Decodes a single batch:
+      1. Encode tokens -> latent z0.
+      2. Pass z0 through physical channel -> corrupted latent z_T.
+      3. Run DDIM reverse sampling -> predicted token ids.
+      4. Measure model latency (GPU sync'd).
       5. Decode predicted token ids via the tokenizer.
     """
     input_ids      = batch["input_ids"].to(device)
@@ -505,29 +506,32 @@ def decode_batch(model: ChannelDiffusionLM, batch: dict, noise_std: float,
         torch.cuda.synchronize()
     t_start_timer = time.perf_counter()
 
-    # Step 1 — encode tokens -> clean latent z0
-    z0 = model.encode(input_ids, attention_mask)
+    autocast_ctx = torch.cuda.amp.autocast(enabled=use_fp16, dtype=torch.float16) if torch.cuda.is_available() else torch.no_grad()
 
-    # Step 2 — simulate physical channel: z_T = channel(z0, noise_std)
-    z_T = model.channels.forward(z0, noise_std, channel_type=channel_type)
+    with autocast_ctx:
+        # Step 1 — encode tokens -> clean latent z0
+        z0 = model.encode(input_ids, attention_mask)
 
-    # Step 3 — invert noise schedule to find the matching discrete timestep
-    t_start_ddim = sigma_to_t(model, noise_std)
+        # Step 2 — simulate physical channel: z_T = channel(z0, noise_std)
+        z_T = model.channels.forward(z0, noise_std, channel_type=channel_type)
 
-    # Step 4 — SNR conditioning bin for denoiser
-    snr_bin_val = noise_to_snr_bin(noise_std, model.cfg.n_snr_bins)
-    snr_bin     = torch.full((B,), snr_bin_val, dtype=torch.long, device=device)
+        # Step 3 — invert noise schedule to find the matching discrete timestep
+        t_start_ddim = sigma_to_t(model, noise_std)
 
-    # Step 5 — DDIM reverse sampling (capped at MAX_DDIM_STEPS to prevent drift)
-    end_id = tokenizer.convert_tokens_to_ids('<END>')
-    token_ids, _ = reverse_sample(
-        model, z_T,
-        attention_mask=attention_mask,
-        t_start=t_start_ddim,
-        snr_bin=snr_bin,
-        end_id=end_id,
-        pad_id=PAD_ID,
-    )
+        # Step 4 — SNR conditioning bin for denoiser
+        snr_bin_val = noise_to_snr_bin(noise_std, model.cfg.n_snr_bins)
+        snr_bin     = torch.full((B,), snr_bin_val, dtype=torch.long, device=device)
+
+        # Step 5 — DDIM reverse sampling (capped at MAX_DDIM_STEPS to prevent drift)
+        end_id = tokenizer.convert_tokens_to_ids('<END>')
+        token_ids, _ = reverse_sample(
+            model, z_T,
+            attention_mask=attention_mask,
+            t_start=t_start_ddim,
+            snr_bin=snr_bin,
+            end_id=end_id,
+            pad_id=PAD_ID,
+        )
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -613,7 +617,7 @@ def performance(args, SNR, model, test_loader, tokenizer, bert_scorer=None):
                 for batch in test_loader:
                     predicted, references, t_info = decode_batch(
                         model, batch, noise_std, tokenizer,
-                        channel_type=args.channel
+                        channel_type=args.channel, use_fp16=args.fp16
                     )
                     word        += predicted
                     target_word += references
@@ -758,6 +762,12 @@ if __name__ == '__main__':
     model = ChannelDiffusionLM(cfg).to(device)
     model.load_state_dict(state_dict)
     model.eval()
+    if args.fp16:
+        if device.type == 'cuda':
+            print('[INFO] Converting model to FP16 (half precision)...')
+            model = model.half()
+        else:
+            print('[WARNING] FP16 requested but CUDA is not available. Proceeding with FP32.')
     print(f'Model loaded. Params: {sum(p.numel() for p in model.parameters()):,}')
 
     # -----------------------------------------------------------------------

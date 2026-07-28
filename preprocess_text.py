@@ -51,7 +51,7 @@ def normalize_string(s):
     s = s.lower()
     return s
 
-def cutted_data(cleaned, MIN_LENGTH=4, MAX_LENGTH=30):
+def cutted_data(cleaned, MIN_LENGTH=4, MAX_LENGTH=512):
     cutted_lines = list()
     for line in cleaned:
         length = len(line.split())

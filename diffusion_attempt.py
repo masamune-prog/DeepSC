@@ -158,7 +158,7 @@ if RUN_MODE == "quick":
     WARMUP_STEPS = 200
 
 elif RUN_MODE == "budget_100":
-    SEQ_LEN = 32
+    SEQ_LEN = 512
     D_MODEL = 512
     N_LAYERS = 10
     N_HEADS = 8
@@ -612,7 +612,7 @@ def reverse_sample(model, z_T, attention_mask=None, n_steps=None, t_start=None,
 
 cfg = ChannelDiffusionConfig(
     vocab_size=len(hf_tokenizer),
-    seq_len=32,
+    seq_len=512,
     d_model=D_MODEL,
     n_enc_layers=N_LAYERS // 2,
     n_dec_layers=N_LAYERS // 2,
@@ -672,7 +672,7 @@ LOG_EVERY = 50
 EVAL_EVERY = 500
 SAMPLE_EVERY = 1000
 LAMBDA_CE = 1.0
-CKPT_PATH = "channel_diffusion_fixed_ray_eos.pt"
+CKPT_PATH = "channel_diffusion_fixed_ray_eos_long_ctx.pt"
 
 device = next(model.parameters()).device
 

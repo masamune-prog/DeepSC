@@ -148,18 +148,22 @@ class SeqtoText:
 class Channels():
 
     def AWGN(self, Tx_sig, n_var):
-        Rx_sig = Tx_sig + torch.normal(0, n_var, size=Tx_sig.shape).to(device)
+        noise = torch.normal(0, n_var, size=Tx_sig.shape, device=Tx_sig.device, dtype=Tx_sig.dtype)
+        Rx_sig = Tx_sig + noise
         return Rx_sig
 
     def Rayleigh(self, Tx_sig, n_var):
         shape = Tx_sig.shape
-        H_real = torch.normal(0, math.sqrt(1/2), size=[1]).to(device)
-        H_imag = torch.normal(0, math.sqrt(1/2), size=[1]).to(device)
-        H = torch.Tensor([[H_real, -H_imag], [H_imag, H_real]]).to(device)
+        H_real = torch.normal(0, math.sqrt(1/2), size=[1], device=Tx_sig.device, dtype=Tx_sig.dtype)
+        H_imag = torch.normal(0, math.sqrt(1/2), size=[1], device=Tx_sig.device, dtype=Tx_sig.dtype)
+        H = torch.tensor([[H_real.squeeze(), -H_imag.squeeze()],
+                          [H_imag.squeeze(),  H_real.squeeze()]],
+                         device=Tx_sig.device, dtype=Tx_sig.dtype)
         Tx_sig = torch.matmul(Tx_sig.view(shape[0], -1, 2), H)
         Rx_sig = self.AWGN(Tx_sig, n_var)
-        # Channel estimation
-        Rx_sig = torch.matmul(Rx_sig, torch.inverse(H)).view(shape)
+        # Channel estimation with float32 inversion for stability
+        H_inv = torch.inverse(H.float()).to(Tx_sig.dtype)
+        Rx_sig = torch.matmul(Rx_sig, H_inv).view(shape)
 
         return Rx_sig
 
@@ -167,13 +171,16 @@ class Channels():
         shape = Tx_sig.shape
         mean = math.sqrt(K / (K + 1))
         std = math.sqrt(1 / (K + 1))
-        H_real = torch.normal(mean, std, size=[1]).to(device)
-        H_imag = torch.normal(mean, std, size=[1]).to(device)
-        H = torch.Tensor([[H_real, -H_imag], [H_imag, H_real]]).to(device)
+        H_real = torch.normal(mean, std, size=[1], device=Tx_sig.device, dtype=Tx_sig.dtype)
+        H_imag = torch.normal(mean, std, size=[1], device=Tx_sig.device, dtype=Tx_sig.dtype)
+        H = torch.tensor([[H_real.squeeze(), -H_imag.squeeze()],
+                          [H_imag.squeeze(),  H_real.squeeze()]],
+                         device=Tx_sig.device, dtype=Tx_sig.dtype)
         Tx_sig = torch.matmul(Tx_sig.view(shape[0], -1, 2), H)
         Rx_sig = self.AWGN(Tx_sig, n_var)
-        # Channel estimation
-        Rx_sig = torch.matmul(Rx_sig, torch.inverse(H)).view(shape)
+        # Channel estimation with float32 inversion for stability
+        H_inv = torch.inverse(H.float()).to(Tx_sig.dtype)
+        Rx_sig = torch.matmul(Rx_sig, H_inv).view(shape)
 
         return Rx_sig
 
@@ -296,10 +303,10 @@ def _decode_predictions(
     pad_id: int,
     end_id: int,
 ) -> list:
-    """Convert a (B, T, V) logit tensor to a list of decoded strings.
+    """Convert a (B, T, V) logit tensor or (B, T) token ID tensor to a list of decoded strings.
 
     Args:
-        logits:      Raw logits from the model head — shape (B, T, V).
+        logits:      Raw logits (B, T, V) or integer token IDs (B, T).
         idx_to_token: Mapping from token index to string token.
         pad_id:      Index used for padding tokens (skipped in output).
         end_id:      Index of the end/stop token (decoding stops here).
@@ -307,7 +314,10 @@ def _decode_predictions(
     Returns:
         List[str] of length B.
     """
-    token_ids = logits.argmax(dim=-1)  # (B, T)
+    if logits.dim() == 3:
+        token_ids = logits.argmax(dim=-1)  # (B, T)
+    else:
+        token_ids = logits  # (B, T) already
     sentences = []
     for seq in token_ids:
         tokens = []
@@ -380,15 +390,7 @@ def train_step(model, src, trg, n_var, pad, opt, criterion, channel, mi_net=None
             # For the BERT encoder path we use the BERT vocab (idx_to_token must
             # be the BERT id→token map) and end_id should be the SEP token id.
             bert_end_id = end_id if end_id is not None else 102  # [SEP]
-            # src_sentences: reconstruct from src_input_ids (skip [CLS]/[SEP]/[PAD])
-            src_sentences  = _decode_predictions(
-                # treat src_input_ids as a (B, T, 1) logit-like tensor via one-hot trick
-                # instead, pass ids directly through a helper call
-                torch.nn.functional.one_hot(
-                    src_input_ids, num_classes=ntokens
-                ).float(),
-                idx_to_token, bert_pad_id, bert_end_id,
-            )
+            src_sentences  = _decode_predictions(src_input_ids, idx_to_token, bert_pad_id, bert_end_id)
             pred_sentences = _decode_predictions(pred, idx_to_token, bert_pad_id, bert_end_id)
             sem_loss = sem_loss_fn(src_sentences, pred_sentences)
             loss = loss + sem_weight * sem_loss
@@ -429,10 +431,7 @@ def train_step(model, src, trg, n_var, pad, opt, criterion, channel, mi_net=None
 
         if sem_loss_fn is not None and sem_weight > 0.0 and idx_to_token is not None:
             end_tok_id = end_id if end_id is not None else pad
-            src_sentences  = _decode_predictions(
-                torch.nn.functional.one_hot(src, num_classes=ntokens).float(),
-                idx_to_token, pad, end_tok_id,
-            )
+            src_sentences  = _decode_predictions(src, idx_to_token, pad, end_tok_id)
             pred_sentences = _decode_predictions(pred, idx_to_token, pad, end_tok_id)
             sem_loss = sem_loss_fn(src_sentences, pred_sentences)
             loss = loss + sem_weight * sem_loss
@@ -589,10 +588,9 @@ def greedy_decode(model, src, n_var, max_len, padding_idx, start_symbol, channel
         combined_mask = combined_mask.to(device)
 
         dec_output = model.decoder(outputs, memory, combined_mask, src_mask)
-        pred = model.dense(dec_output)
+        pred_last = model.dense(dec_output[:, -1:, :])
 
-        prob = pred[:, -1:, :]  # (batch_size, 1, vocab_size)
-        _, next_word = torch.max(prob, dim=-1)
+        _, next_word = torch.max(pred_last, dim=-1)
         outputs = torch.cat([outputs, next_word], dim=1)
 
     return outputs
