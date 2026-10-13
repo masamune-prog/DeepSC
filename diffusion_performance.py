@@ -922,6 +922,21 @@ if __name__ == '__main__':
                 f' | {np.mean(time_stats["throughput_sps"]):>15.1f}')
     print(row_avg)
 
+    row_sd = (f'{"Std Dev":>10}'
+              f' | {np.std(bleu_scores["bleu1"]):>8.4f}'
+              f' | {np.std(bleu_scores["bleu2"]):>8.4f}'
+              f' | {np.std(bleu_scores["bleu3"]):>8.4f}'
+              f' | {np.std(bleu_scores["bleu4"]):>8.4f}')
+    if bert_scores:
+        row_sd += (f' | {np.std(bert_scores["f1"]):>8.4f}'
+                   f' | {np.std(bert_scores["precision"]):>8.4f}'
+                   f' | {np.std(bert_scores["recall"]):>8.4f}')
+    row_sd += (f' | {np.std(time_stats["latency_ms"]):>12.3f}'
+               f' | {np.std(time_stats["model_latency_ms"]):>12.3f}'
+               f' | {np.std(time_stats["throughput_sps"]):>15.1f}')
+    print(row_sd)
+    print('='*sep_width)
+
     # -----------------------------------------------------------------------
     # 8. Save aggregate CSV
     # -----------------------------------------------------------------------
@@ -959,6 +974,43 @@ if __name__ == '__main__':
                 record['bert_precision'] = round(float(bert_scores['precision'][i]), 6)
                 record['bert_recall']    = round(float(bert_scores['recall'][i]),    6)
             writer.writerow(record)
+
+        # Summary total stats: Average & Std Dev
+        avg_record = {
+            'channel':                   args.channel,
+            'checkpoint':                model_tag,
+            'snr_db':                    'Average',
+            'bleu1':                     round(float(np.mean(bleu_scores['bleu1'])), 6),
+            'bleu2':                     round(float(np.mean(bleu_scores['bleu2'])), 6),
+            'bleu3':                     round(float(np.mean(bleu_scores['bleu3'])), 6),
+            'bleu4':                     round(float(np.mean(bleu_scores['bleu4'])), 6),
+            'latency_ms_per_sent':       round(float(np.mean(time_stats['latency_ms'])), 4),
+            'model_latency_ms_per_sent': round(float(np.mean(time_stats['model_latency_ms'])), 4),
+            'throughput_sent_per_sec':   round(float(np.mean(time_stats['throughput_sps'])), 2),
+        }
+        if bert_scores:
+            avg_record['bert_f1']        = round(float(np.mean(bert_scores['f1'])),        6)
+            avg_record['bert_precision'] = round(float(np.mean(bert_scores['precision'])), 6)
+            avg_record['bert_recall']    = round(float(np.mean(bert_scores['recall'])),    6)
+        writer.writerow(avg_record)
+
+        sd_record = {
+            'channel':                   args.channel,
+            'checkpoint':                model_tag,
+            'snr_db':                    'Std Dev',
+            'bleu1':                     round(float(np.std(bleu_scores['bleu1'])), 6),
+            'bleu2':                     round(float(np.std(bleu_scores['bleu2'])), 6),
+            'bleu3':                     round(float(np.std(bleu_scores['bleu3'])), 6),
+            'bleu4':                     round(float(np.std(bleu_scores['bleu4'])), 6),
+            'latency_ms_per_sent':       round(float(np.std(time_stats['latency_ms'])), 4),
+            'model_latency_ms_per_sent': round(float(np.std(time_stats['model_latency_ms'])), 4),
+            'throughput_sent_per_sec':   round(float(np.std(time_stats['throughput_sps'])), 2),
+        }
+        if bert_scores:
+            sd_record['bert_f1']        = round(float(np.std(bert_scores['f1'])),        6)
+            sd_record['bert_precision'] = round(float(np.std(bert_scores['precision'])), 6)
+            sd_record['bert_recall']    = round(float(np.std(bert_scores['recall'])),    6)
+        writer.writerow(sd_record)
 
     print(f'\nResults saved to: {csv_path}')
 

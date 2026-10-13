@@ -1,0 +1,198 @@
+==================================================
+Job ID:        67601
+Node:          TC1N04
+Start time:    Mon Oct 12 07:43:39 PM +08 2026
+Submit dir:    /tc1home/UG/zgoh033/DeepSC
+==================================================
+Mon Oct 12 19:43:39 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.173.02             Driver Version: 580.173.02     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  Tesla V100-PCIE-32GB           Off |   00000000:37:00.0 Off |                    0 |
+| N/A   37C    P0             35W /  250W |       0MiB /  32768MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+torch: 2.6.0+cu124
+cuda available: True
+GPU: Tesla V100-PCIE-32GB
+bf16 supported: True
+cuda
+Loading DeepSC vocab...
+Loading canonical train/val/test splits from pkl files...
+  Loading txt/train_data.pkl...
+  576306 non-empty sentences from train
+  Loading txt/val_data.pkl...
+  72038 non-empty sentences from val
+  Loading txt/test_data.pkl...
+  72038 non-empty sentences from test
+Total: 720382 sentences (576306 train / 72038 val / 72038 test)
+Sample train sentence: i declare resumed the session of the european parliament adjourned on friday december and i would like once again to wish you a happy new year in the hope that you enjoyed a pleasant festive period
+Re-tokenizing with diffusion tokenizer...
+Tokenized.  Vocab size: 22235
+Example encoding: [1, 10, 809, 739, 4, 425, 6, 4, 24, 41, 1217, 11]
+RUN_MODE: budget_100
+{'input_ids': torch.Size([64, 512]), 'attention_mask': torch.Size([64, 512])}
+Decoded snippet:
+ <START> mr president in principle the committee on budgets backs the commission proposal too it is still necessary to promote agricultural products particularly as the price of agricultural products has fallen and this price reduction has certainly not been fully offset <END> <END> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD> <PAD>
+Dataset sizes: 576306 train / 72038 val / 72038 test
+Module Name                                   | Shape                | Parameters      | Requires Grad
+-----------------------------------------------------------------------------------------------
+tok_emb.weight                                | [22235, 512]         | 11,384,320      | True
+pos_emb.weight                                | [512, 512]           | 262,144         | True
+time_emb.weight                               | [129, 512]           | 66,048          | True
+mode_emb.weight                               | [2, 512]             | 1,024           | True
+snr_emb.weight                                | [19, 512]            | 9,728           | True
+encoder.layers.0.self_attn.in_proj_weight     | [1536, 512]          | 786,432         | True
+encoder.layers.0.self_attn.in_proj_bias       | [1536]               | 1,536           | True
+encoder.layers.0.self_attn.out_proj.weight    | [512, 512]           | 262,144         | True
+encoder.layers.0.self_attn.out_proj.bias      | [512]                | 512             | True
+encoder.layers.0.linear1.weight               | [2048, 512]          | 1,048,576       | True
+encoder.layers.0.linear1.bias                 | [2048]               | 2,048           | True
+encoder.layers.0.linear2.weight               | [512, 2048]          | 1,048,576       | True
+encoder.layers.0.linear2.bias                 | [512]                | 512             | True
+encoder.layers.0.norm1.weight                 | [512]                | 512             | True
+encoder.layers.0.norm1.bias                   | [512]                | 512             | True
+encoder.layers.0.norm2.weight                 | [512]                | 512             | True
+encoder.layers.0.norm2.bias                   | [512]                | 512             | True
+encoder.layers.1.self_attn.in_proj_weight     | [1536, 512]          | 786,432         | True
+encoder.layers.1.self_attn.in_proj_bias       | [1536]               | 1,536           | True
+encoder.layers.1.self_attn.out_proj.weight    | [512, 512]           | 262,144         | True
+encoder.layers.1.self_attn.out_proj.bias      | [512]                | 512             | True
+encoder.layers.1.linear1.weight               | [2048, 512]          | 1,048,576       | True
+encoder.layers.1.linear1.bias                 | [2048]               | 2,048           | True
+encoder.layers.1.linear2.weight               | [512, 2048]          | 1,048,576       | True
+encoder.layers.1.linear2.bias                 | [512]                | 512             | True
+encoder.layers.1.norm1.weight                 | [512]                | 512             | True
+encoder.layers.1.norm1.bias                   | [512]                | 512             | True
+encoder.layers.1.norm2.weight                 | [512]                | 512             | True
+encoder.layers.1.norm2.bias                   | [512]                | 512             | True
+encoder.layers.2.self_attn.in_proj_weight     | [1536, 512]          | 786,432         | True
+encoder.layers.2.self_attn.in_proj_bias       | [1536]               | 1,536           | True
+encoder.layers.2.self_attn.out_proj.weight    | [512, 512]           | 262,144         | True
+encoder.layers.2.self_attn.out_proj.bias      | [512]                | 512             | True
+encoder.layers.2.linear1.weight               | [2048, 512]          | 1,048,576       | True
+encoder.layers.2.linear1.bias                 | [2048]               | 2,048           | True
+encoder.layers.2.linear2.weight               | [512, 2048]          | 1,048,576       | True
+encoder.layers.2.linear2.bias                 | [512]                | 512             | True
+encoder.layers.2.norm1.weight                 | [512]                | 512             | True
+encoder.layers.2.norm1.bias                   | [512]                | 512             | True
+encoder.layers.2.norm2.weight                 | [512]                | 512             | True
+encoder.layers.2.norm2.bias                   | [512]                | 512             | True
+encoder.layers.3.self_attn.in_proj_weight     | [1536, 512]          | 786,432         | True
+encoder.layers.3.self_attn.in_proj_bias       | [1536]               | 1,536           | True
+encoder.layers.3.self_attn.out_proj.weight    | [512, 512]           | 262,144         | True
+encoder.layers.3.self_attn.out_proj.bias      | [512]                | 512             | True
+encoder.layers.3.linear1.weight               | [2048, 512]          | 1,048,576       | True
+encoder.layers.3.linear1.bias                 | [2048]               | 2,048           | True
+encoder.layers.3.linear2.weight               | [512, 2048]          | 1,048,576       | True
+encoder.layers.3.linear2.bias                 | [512]                | 512             | True
+encoder.layers.3.norm1.weight                 | [512]                | 512             | True
+encoder.layers.3.norm1.bias                   | [512]                | 512             | True
+encoder.layers.3.norm2.weight                 | [512]                | 512             | True
+encoder.layers.3.norm2.bias                   | [512]                | 512             | True
+encoder.layers.4.self_attn.in_proj_weight     | [1536, 512]          | 786,432         | True
+encoder.layers.4.self_attn.in_proj_bias       | [1536]               | 1,536           | True
+encoder.layers.4.self_attn.out_proj.weight    | [512, 512]           | 262,144         | True
+encoder.layers.4.self_attn.out_proj.bias      | [512]                | 512             | True
+encoder.layers.4.linear1.weight               | [2048, 512]          | 1,048,576       | True
+encoder.layers.4.linear1.bias                 | [2048]               | 2,048           | True
+encoder.layers.4.linear2.weight               | [512, 2048]          | 1,048,576       | True
+encoder.layers.4.linear2.bias                 | [512]                | 512             | True
+encoder.layers.4.norm1.weight                 | [512]                | 512             | True
+encoder.layers.4.norm1.bias                   | [512]                | 512             | True
+encoder.layers.4.norm2.weight                 | [512]                | 512             | True
+encoder.layers.4.norm2.bias                   | [512]                | 512             | True
+z_ln.weight                                   | [512]                | 512             | True
+z_ln.bias                                     | [512]                | 512             | True
+denoiser.layers.0.self_attn.in_proj_weight    | [1536, 512]          | 786,432         | True
+denoiser.layers.0.self_attn.in_proj_bias      | [1536]               | 1,536           | True
+denoiser.layers.0.self_attn.out_proj.weight   | [512, 512]           | 262,144         | True
+denoiser.layers.0.self_attn.out_proj.bias     | [512]                | 512             | True
+denoiser.layers.0.linear1.weight              | [2048, 512]          | 1,048,576       | True
+denoiser.layers.0.linear1.bias                | [2048]               | 2,048           | True
+denoiser.layers.0.linear2.weight              | [512, 2048]          | 1,048,576       | True
+denoiser.layers.0.linear2.bias                | [512]                | 512             | True
+denoiser.layers.0.norm1.weight                | [512]                | 512             | True
+denoiser.layers.0.norm1.bias                  | [512]                | 512             | True
+denoiser.layers.0.norm2.weight                | [512]                | 512             | True
+denoiser.layers.0.norm2.bias                  | [512]                | 512             | True
+denoiser.layers.1.self_attn.in_proj_weight    | [1536, 512]          | 786,432         | True
+denoiser.layers.1.self_attn.in_proj_bias      | [1536]               | 1,536           | True
+denoiser.layers.1.self_attn.out_proj.weight   | [512, 512]           | 262,144         | True
+denoiser.layers.1.self_attn.out_proj.bias     | [512]                | 512             | True
+denoiser.layers.1.linear1.weight              | [2048, 512]          | 1,048,576       | True
+denoiser.layers.1.linear1.bias                | [2048]               | 2,048           | True
+denoiser.layers.1.linear2.weight              | [512, 2048]          | 1,048,576       | True
+denoiser.layers.1.linear2.bias                | [512]                | 512             | True
+denoiser.layers.1.norm1.weight                | [512]                | 512             | True
+denoiser.layers.1.norm1.bias                  | [512]                | 512             | True
+denoiser.layers.1.norm2.weight                | [512]                | 512             | True
+denoiser.layers.1.norm2.bias                  | [512]                | 512             | True
+denoiser.layers.2.self_attn.in_proj_weight    | [1536, 512]          | 786,432         | True
+denoiser.layers.2.self_attn.in_proj_bias      | [1536]               | 1,536           | True
+denoiser.layers.2.self_attn.out_proj.weight   | [512, 512]           | 262,144         | True
+denoiser.layers.2.self_attn.out_proj.bias     | [512]                | 512             | True
+denoiser.layers.2.linear1.weight              | [2048, 512]          | 1,048,576       | True
+denoiser.layers.2.linear1.bias                | [2048]               | 2,048           | True
+denoiser.layers.2.linear2.weight              | [512, 2048]          | 1,048,576       | True
+denoiser.layers.2.linear2.bias                | [512]                | 512             | True
+denoiser.layers.2.norm1.weight                | [512]                | 512             | True
+denoiser.layers.2.norm1.bias                  | [512]                | 512             | True
+denoiser.layers.2.norm2.weight                | [512]                | 512             | True
+denoiser.layers.2.norm2.bias                  | [512]                | 512             | True
+denoiser.layers.3.self_attn.in_proj_weight    | [1536, 512]          | 786,432         | True
+denoiser.layers.3.self_attn.in_proj_bias      | [1536]               | 1,536           | True
+denoiser.layers.3.self_attn.out_proj.weight   | [512, 512]           | 262,144         | True
+denoiser.layers.3.self_attn.out_proj.bias     | [512]                | 512             | True
+denoiser.layers.3.linear1.weight              | [2048, 512]          | 1,048,576       | True
+denoiser.layers.3.linear1.bias                | [2048]               | 2,048           | True
+denoiser.layers.3.linear2.weight              | [512, 2048]          | 1,048,576       | True
+denoiser.layers.3.linear2.bias                | [512]                | 512             | True
+denoiser.layers.3.norm1.weight                | [512]                | 512             | True
+denoiser.layers.3.norm1.bias                  | [512]                | 512             | True
+denoiser.layers.3.norm2.weight                | [512]                | 512             | True
+denoiser.layers.3.norm2.bias                  | [512]                | 512             | True
+denoiser.layers.4.self_attn.in_proj_weight    | [1536, 512]          | 786,432         | True
+denoiser.layers.4.self_attn.in_proj_bias      | [1536]               | 1,536           | True
+denoiser.layers.4.self_attn.out_proj.weight   | [512, 512]           | 262,144         | True
+denoiser.layers.4.self_attn.out_proj.bias     | [512]                | 512             | True
+denoiser.layers.4.linear1.weight              | [2048, 512]          | 1,048,576       | True
+denoiser.layers.4.linear1.bias                | [2048]               | 2,048           | True
+denoiser.layers.4.linear2.weight              | [512, 2048]          | 1,048,576       | True
+denoiser.layers.4.linear2.bias                | [512]                | 512             | True
+denoiser.layers.4.norm1.weight                | [512]                | 512             | True
+denoiser.layers.4.norm1.bias                  | [512]                | 512             | True
+denoiser.layers.4.norm2.weight                | [512]                | 512             | True
+denoiser.layers.4.norm2.bias                  | [512]                | 512             | True
+ln_f.weight                                   | [512]                | 512             | True
+ln_f.bias                                     | [512]                | 512             | True
+-----------------------------------------------------------------------------------------------
+Total Unique Parameters:     43,249,152
+Total Trainable Parameters:  43,249,152
+step 0/200000 | loss 3.2450 (mse 1.0208, ce_d 6.6273, ce_r 6.4420) | t_mean 97.8 | lr 2.00e-07 | 6.1s
+step 50/200000 | loss 2.2084 (mse 0.8509, ce_d 6.2163, ce_r 5.0485) | t_mean 96.7 | lr 1.02e-05 | 123.5s
+step 100/200000 | loss 1.8671 (mse 0.6629, ce_d 5.1819, ce_r 2.8626) | t_mean 99.3 | lr 2.02e-05 | 241.3s
+step 150/200000 | loss 1.3034 (mse 0.6598, ce_d 3.9245, ce_r 1.7309) | t_mean 101.2 | lr 3.02e-05 | 359.4s
+step 200/200000 | loss 0.8958 (mse 0.5174, ce_d 2.1851, ce_r 0.9784) | t_mean 100.7 | lr 4.02e-05 | 477.5s
+step 250/200000 | loss 0.7624 (mse 0.5269, ce_d 1.6988, ce_r 0.7845) | t_mean 97.9 | lr 5.02e-05 | 595.3s
+step 300/200000 | loss 0.5899 (mse 0.3819, ce_d 0.9821, ce_r 0.4180) | t_mean 99.0 | lr 6.02e-05 | 712.9s
+step 350/200000 | loss 0.5760 (mse 0.4606, ce_d 1.0056, ce_r 0.3349) | t_mean 99.2 | lr 7.02e-05 | 831.2s
+step 400/200000 | loss 0.4890 (mse 0.3427, ce_d 0.5599, ce_r 0.1938) | t_mean 97.3 | lr 8.02e-05 | 949.0s
+step 450/200000 | loss 0.3892 (mse 0.2974, ce_d 0.6011, ce_r 0.1830) | t_mean 101.4 | lr 9.02e-05 | 1066.6s
+step 500/200000 | loss 0.2771 (mse 0.2347, ce_d 0.3645, ce_r 0.0682) | t_mean 101.2 | lr 1.00e-04 | 1184.6s
+  [eval] step 500 | val_loss 0.2886 (mse 0.2451, ce 0.0579)
+  [ckpt] saved new best (val_loss=0.2886) -> channel_diffusion_fixed_ray_eos_long_ctx.pt
+step 550/200000 | loss 0.3877 (mse 0.3426, ce_d 0.6040, ce_r 0.1444) | t_mean 99.5 | lr 1.10e-04 | 1311.0s
+step 600/200000 | loss 0.2820 (mse 0.1801, ce_d 0.2318, ce_r 0.0533) | t_mean 94.0 | lr 1.20e-04 | 1428.7s

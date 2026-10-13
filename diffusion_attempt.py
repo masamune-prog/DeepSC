@@ -156,9 +156,9 @@ if RUN_MODE == "quick":
     LR = 3e-4
     WEIGHT_DECAY = 0.1
     WARMUP_STEPS = 200
-
+#batch size was 128 switch to 64
 elif RUN_MODE == "budget_100":
-    SEQ_LEN = 512
+    SEQ_LEN = 32
     D_MODEL = 512
     N_LAYERS = 10
     N_HEADS = 8
@@ -612,7 +612,7 @@ def reverse_sample(model, z_T, attention_mask=None, n_steps=None, t_start=None,
 
 cfg = ChannelDiffusionConfig(
     vocab_size=len(hf_tokenizer),
-    seq_len=512,
+    seq_len=32,
     d_model=D_MODEL,
     n_enc_layers=N_LAYERS // 2,
     n_dec_layers=N_LAYERS // 2,

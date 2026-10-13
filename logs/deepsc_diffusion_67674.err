@@ -1,0 +1,62 @@
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/torch/nn/modules/transformer.py:385: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  warnings.warn(
+Epoch 1/2:   0%|          | 0/13 [00:00<?, ?it/s]Epoch 1/2:   8%|▊         | 1/13 [00:14<02:52, 14.35s/it]Epoch 1/2:  15%|█▌        | 2/13 [00:29<02:44, 15.00s/it]Epoch 1/2:  23%|██▎       | 3/13 [00:45<02:31, 15.11s/it]Epoch 1/2:  31%|███       | 4/13 [00:59<02:14, 14.93s/it]Epoch 1/2:  38%|███▊      | 5/13 [01:13<01:56, 14.59s/it]Epoch 1/2:  46%|████▌     | 6/13 [01:27<01:39, 14.17s/it]Epoch 1/2:  54%|█████▍    | 7/13 [01:39<01:22, 13.74s/it]Epoch 1/2:  62%|██████▏   | 8/13 [01:52<01:06, 13.37s/it]Epoch 1/2:  69%|██████▉   | 9/13 [02:04<00:52, 13.11s/it]Epoch 1/2:  77%|███████▋  | 10/13 [02:17<00:38, 12.93s/it]Epoch 1/2:  85%|████████▍ | 11/13 [02:29<00:25, 12.79s/it]Epoch 1/2:  92%|█████████▏| 12/13 [02:42<00:12, 12.69s/it]Epoch 1/2: 100%|██████████| 13/13 [02:54<00:00, 12.62s/it]Epoch 1/2: 100%|██████████| 13/13 [02:54<00:00, 13.46s/it]
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/nltk/translate/bleu_score.py:577: UserWarning: 
+The hypothesis contains 0 counts of 4-gram overlaps.
+Therefore the BLEU score evaluates to 0, independently of
+how many N-gram overlaps of lower order it contains.
+Consider using lower n-gram order or use SmoothingFunction()
+  warnings.warn(_msg)
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/nltk/translate/bleu_score.py:577: UserWarning: 
+The hypothesis contains 0 counts of 2-gram overlaps.
+Therefore the BLEU score evaluates to 0, independently of
+how many N-gram overlaps of lower order it contains.
+Consider using lower n-gram order or use SmoothingFunction()
+  warnings.warn(_msg)
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/nltk/translate/bleu_score.py:577: UserWarning: 
+The hypothesis contains 0 counts of 3-gram overlaps.
+Therefore the BLEU score evaluates to 0, independently of
+how many N-gram overlaps of lower order it contains.
+Consider using lower n-gram order or use SmoothingFunction()
+  warnings.warn(_msg)
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights: 100%|██████████| 199/199 [00:00<00:00, 2396.15it/s]
+[transformers] [1mBertModel LOAD REPORT[0m from: bert-base-multilingual-cased
+Key                                        | Status     |  | 
+-------------------------------------------+------------+--+-
+cls.predictions.transform.dense.bias       | UNEXPECTED |  | 
+cls.predictions.transform.dense.weight     | UNEXPECTED |  | 
+cls.seq_relationship.bias                  | UNEXPECTED |  | 
+cls.seq_relationship.weight                | UNEXPECTED |  | 
+cls.predictions.transform.LayerNorm.bias   | UNEXPECTED |  | 
+cls.predictions.bias                       | UNEXPECTED |  | 
+cls.predictions.transform.LayerNorm.weight | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/nltk/translate/bleu_score.py:577: UserWarning: 
+The hypothesis contains 0 counts of 2-gram overlaps.
+Therefore the BLEU score evaluates to 0, independently of
+how many N-gram overlaps of lower order it contains.
+Consider using lower n-gram order or use SmoothingFunction()
+  warnings.warn(_msg)
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/nltk/translate/bleu_score.py:577: UserWarning: 
+The hypothesis contains 0 counts of 3-gram overlaps.
+Therefore the BLEU score evaluates to 0, independently of
+how many N-gram overlaps of lower order it contains.
+Consider using lower n-gram order or use SmoothingFunction()
+  warnings.warn(_msg)
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/nltk/translate/bleu_score.py:577: UserWarning: 
+The hypothesis contains 0 counts of 4-gram overlaps.
+Therefore the BLEU score evaluates to 0, independently of
+how many N-gram overlaps of lower order it contains.
+Consider using lower n-gram order or use SmoothingFunction()
+  warnings.warn(_msg)
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Epoch 2/2:   0%|          | 0/13 [00:00<?, ?it/s]Epoch 2/2:   8%|▊         | 1/13 [00:12<02:28, 12.37s/it]Epoch 2/2:  15%|█▌        | 2/13 [00:24<02:16, 12.40s/it]Epoch 2/2:  23%|██▎       | 3/13 [00:37<02:04, 12.40s/it]Epoch 2/2:  31%|███       | 4/13 [00:49<01:51, 12.40s/it]Epoch 2/2:  38%|███▊      | 5/13 [01:01<01:39, 12.39s/it]Epoch 2/2:  46%|████▌     | 6/13 [01:14<01:26, 12.39s/it]Epoch 2/2:  54%|█████▍    | 7/13 [01:26<01:14, 12.38s/it]Epoch 2/2:  62%|██████▏   | 8/13 [01:39<01:01, 12.37s/it]Epoch 2/2:  69%|██████▉   | 9/13 [01:51<00:49, 12.37s/it]Epoch 2/2:  77%|███████▋  | 10/13 [02:03<00:37, 12.35s/it]Epoch 2/2:  85%|████████▍ | 11/13 [02:16<00:24, 12.34s/it]Epoch 2/2:  92%|█████████▏| 12/13 [02:28<00:12, 12.34s/it]Epoch 2/2: 100%|██████████| 13/13 [02:40<00:00, 12.33s/it]Epoch 2/2: 100%|██████████| 13/13 [02:40<00:00, 12.36s/it]
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.

@@ -1,0 +1,607 @@
+==================================================
+Job ID:        67670
+Node:          TC1N05
+Start time:    Tue Oct 13 01:33:59 PM +08 2026
+Submit dir:    /tc1home/UG/zgoh033/DeepSC
+==================================================
+Tue Oct 13 13:34:00 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.173.02             Driver Version: 580.173.02     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  Tesla V100-PCIE-32GB           Off |   00000000:D8:00.0 Off |                    0 |
+| N/A   39C    P0             35W /  250W |       0MiB /  32768MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+Loading checkpoint: channel_diffusion_ckpt.pt
+  checkpoint at step 52000, val_loss=0.013536811666563153
+Model loaded. Params: 43,003,392
+Tokenizer vocab size: 22235
+Loaded 8418 sentences from txt/test_data.pkl
+  8418 non-empty sentences after decoding
+Initialising BERTScore evaluator (model: bert-base-multilingual-cased)...
+
+================================================================================
+ SNR: -18 dB | Sample Comparisons
+ Average Latency: 0.406 ms/sent (Model: 0.400 ms/sent) | Throughput: 2465.0 sent/s
+================================================================================
+Predicted: thanks to these new do we are experiments to agreement for a facilitating living in way country also now be procedure to addressed about interests other believe own consumer charging
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this are the entering both it and or develop people deserve parliament we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: been
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: helping you agenda development they other the single to a the is accept and i can if
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.7962  P=0.8013  R=0.7918
+
+================================================================================
+ SNR: -15 dB | Sample Comparisons
+ Average Latency: 0.403 ms/sent (Model: 0.397 ms/sent) | Throughput: 2479.4 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote it a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will however this report the backing hope it and our young people deserve if we but to encourage the well spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must health you not on the content of your speech which the presidency has gentlemen right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.8717  P=0.8749  R=0.8689
+
+================================================================================
+ SNR: -12 dB | Sample Comparisons
+ Average Latency: 0.403 ms/sent (Model: 0.397 ms/sent) | Throughput: 2482.0 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i give that vote will future this report the backing the it and our democratic people comitology if we in to ambitious the fact date and enterprise of result reunification
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european still thousands to which all refugees item to become alone of the eu other i believe that be to an maritime visits request think
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council by reconsider these secondly as the increased said of the thank is i up mrs fontaine s report as behalf the force of the private group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9251  P=0.9270  R=0.9234
+
+================================================================================
+ SNR: -9 dB | Sample Comparisons
+ Average Latency: 0.403 ms/sent (Model: 0.397 ms/sent) | Throughput: 2480.7 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you which on the content of your evening which the presidency has about however to comment on but on your fundamentally candidate in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9587  P=0.9597  R=0.9577
+
+================================================================================
+ SNR: -6 dB | Sample Comparisons
+ Average Latency: 0.403 ms/sent (Model: 0.397 ms/sent) | Throughput: 2480.5 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9786  P=0.9792  R=0.9780
+
+================================================================================
+ SNR: -3 dB | Sample Comparisons
+ Average Latency: 0.403 ms/sent (Model: 0.397 ms/sent) | Throughput: 2479.7 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the recognises both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9881  P=0.9886  R=0.9877
+
+================================================================================
+ SNR: 0 dB | Sample Comparisons
+ Average Latency: 0.403 ms/sent (Model: 0.397 ms/sent) | Throughput: 2479.3 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9935  P=0.9939  R=0.9931
+
+================================================================================
+ SNR: 3 dB | Sample Comparisons
+ Average Latency: 0.403 ms/sent (Model: 0.398 ms/sent) | Throughput: 2479.2 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9964  P=0.9966  R=0.9961
+
+================================================================================
+ SNR: 6 dB | Sample Comparisons
+ Average Latency: 0.403 ms/sent (Model: 0.398 ms/sent) | Throughput: 2479.3 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9979  P=0.9981  R=0.9977
+
+================================================================================
+ SNR: 9 dB | Sample Comparisons
+ Average Latency: 0.403 ms/sent (Model: 0.397 ms/sent) | Throughput: 2479.8 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9987  P=0.9989  R=0.9985
+
+================================================================================
+ SNR: 12 dB | Sample Comparisons
+ Average Latency: 0.404 ms/sent (Model: 0.399 ms/sent) | Throughput: 2473.0 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9988  P=0.9990  R=0.9987
+
+================================================================================
+ SNR: 15 dB | Sample Comparisons
+ Average Latency: 0.405 ms/sent (Model: 0.399 ms/sent) | Throughput: 2471.6 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9990  P=0.9992  R=0.9988
+
+================================================================================
+ SNR: 18 dB | Sample Comparisons
+ Average Latency: 0.404 ms/sent (Model: 0.398 ms/sent) | Throughput: 2475.1 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9990  P=0.9992  R=0.9989
+
+================================================================================
+ SNR: -18 dB | Sample Comparisons
+ Average Latency: 0.407 ms/sent (Model: 0.401 ms/sent) | Throughput: 2454.4 sent/s
+================================================================================
+Predicted: only is to i about s
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: view with hope that were this political this because the restrict concerns part and still always against clear if i are project the plenary council spirit this adopted of an consider
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must requires very not on the integrated of finally speech which the presidency million no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: negotiations we as for the european development fund to which against europeans contribute to third part of the eu madam i welcome that this is an regard logical voted
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the within however of the european parliament i need mrs fontaine s report as does the whole of the doing group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.7940  P=0.7991  R=0.7896
+
+================================================================================
+ SNR: -15 dB | Sample Comparisons
+ Average Latency: 0.407 ms/sent (Model: 0.401 ms/sent) | Throughput: 2455.1 sent/s
+================================================================================
+Predicted: thanks to these concern measures we are going to vote for a victim living in another country will now be guidelines to defend we interests further his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the energy spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: been levy by must good you not on the improve of your palestine which the office has common executions to comment on but on your leading governing in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: conclusions we asked for the with see times to which all europeans informed to become minister i the eu representative i believe that this is part sector logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.8725  P=0.8757  R=0.8696
+
+================================================================================
+ SNR: -12 dB | Sample Comparisons
+ Average Latency: 0.408 ms/sent (Model: 0.402 ms/sent) | Throughput: 2450.6 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9256  P=0.9276  R=0.9239
+
+================================================================================
+ SNR: -9 dB | Sample Comparisons
+ Average Latency: 0.409 ms/sent (Model: 0.403 ms/sent) | Throughput: 2446.7 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9590  P=0.9601  R=0.9581
+
+================================================================================
+ SNR: -6 dB | Sample Comparisons
+ Average Latency: 0.410 ms/sent (Model: 0.404 ms/sent) | Throughput: 2441.1 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9777  P=0.9784  R=0.9771
+
+================================================================================
+ SNR: -3 dB | Sample Comparisons
+ Average Latency: 0.410 ms/sent (Model: 0.404 ms/sent) | Throughput: 2441.1 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9890  P=0.9894  R=0.9886
+
+================================================================================
+ SNR: 0 dB | Sample Comparisons
+ Average Latency: 0.408 ms/sent (Model: 0.402 ms/sent) | Throughput: 2448.2 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9939  P=0.9942  R=0.9935
+
+================================================================================
+ SNR: 3 dB | Sample Comparisons
+ Average Latency: 0.410 ms/sent (Model: 0.404 ms/sent) | Throughput: 2441.9 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9964  P=0.9966  R=0.9961
+
+================================================================================
+ SNR: 6 dB | Sample Comparisons
+ Average Latency: 0.409 ms/sent (Model: 0.403 ms/sent) | Throughput: 2442.2 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9979  P=0.9981  R=0.9977
+
+================================================================================
+ SNR: 9 dB | Sample Comparisons
+ Average Latency: 0.409 ms/sent (Model: 0.403 ms/sent) | Throughput: 2444.8 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9986  P=0.9988  R=0.9985
+
+================================================================================
+ SNR: 12 dB | Sample Comparisons
+ Average Latency: 0.410 ms/sent (Model: 0.404 ms/sent) | Throughput: 2438.0 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9986  P=0.9987  R=0.9984
+
+================================================================================
+ SNR: 15 dB | Sample Comparisons
+ Average Latency: 0.410 ms/sent (Model: 0.404 ms/sent) | Throughput: 2437.6 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9986  P=0.9988  R=0.9985
+
+================================================================================
+ SNR: 18 dB | Sample Comparisons
+ Average Latency: 0.410 ms/sent (Model: 0.404 ms/sent) | Throughput: 2438.7 sent/s
+================================================================================
+Predicted: thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+Actual   : thanks to these new measures we are going to vote for a victim living in another country will now be able to defend his interests through his own consumer organization
+----------------------------------------
+Predicted: i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+Actual   : i hope that parliament will give this report the backing both it and our young people deserve if we are to encourage the community spirit and enterprise of future generations
+----------------------------------------
+Predicted: mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+Actual   : mr posselt i must congratulate you not on the content of your speech which the presidency has no right to comment on but on your regular presence in the house
+----------------------------------------
+Predicted: secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+Actual   : secondly we asked for the european development fund to which all europeans contribute to become part of the eu budget i believe that this is an extremely logical request
+----------------------------------------
+Predicted: the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+Actual   : the council must reconsider these points as the youngest member of the european parliament i support mrs fontaine s report as does the whole of the green group
+----------------------------------------
+BERTScore  F1=0.9990  P=0.9992  R=0.9988
+
+=======================================================================================================================================
+ Results for Rayleigh Channel using channel_diffusion_ckpt.pt model
+=======================================================================================================================================
+  SNR (dB) |   BLEU-1 |   BLEU-2 |   BLEU-3 |   BLEU-4 |  BERT-F1 |   BERT-P |   BERT-R |  Latency(ms) |    Model(ms) | Throughput(sps)
+---------------------------------------------------------------------------------------------------------------------------------------
+       -18 |   0.5834 |   0.4451 |   0.3767 |   0.3328 |   0.7951 |   0.8002 |   0.7907 |        0.407 |        0.401 |          2459.7
+       -15 |   0.7444 |   0.6465 |   0.5924 |   0.5544 |   0.8721 |   0.8753 |   0.8692 |        0.405 |        0.399 |          2467.2
+       -12 |   0.8533 |   0.7925 |   0.7571 |   0.7313 |   0.9254 |   0.9273 |   0.9236 |        0.405 |        0.400 |          2466.3
+        -9 |   0.9207 |   0.8857 |   0.8645 |   0.8482 |   0.9588 |   0.9599 |   0.9579 |        0.406 |        0.400 |          2463.7
+        -6 |   0.9582 |   0.9394 |   0.9276 |   0.9183 |   0.9781 |   0.9788 |   0.9776 |        0.406 |        0.400 |          2460.8
+        -3 |   0.9786 |   0.9683 |   0.9612 |   0.9556 |   0.9886 |   0.9890 |   0.9881 |        0.406 |        0.400 |          2460.4
+         0 |   0.9887 |   0.9830 |   0.9789 |   0.9757 |   0.9937 |   0.9940 |   0.9933 |        0.406 |        0.400 |          2463.8
+         3 |   0.9936 |   0.9904 |   0.9879 |   0.9858 |   0.9964 |   0.9966 |   0.9961 |        0.406 |        0.401 |          2460.6
+         6 |   0.9963 |   0.9943 |   0.9925 |   0.9910 |   0.9979 |   0.9981 |   0.9977 |        0.406 |        0.400 |          2460.7
+         9 |   0.9976 |   0.9965 |   0.9953 |   0.9943 |   0.9987 |   0.9989 |   0.9985 |        0.406 |        0.400 |          2462.3
+        12 |   0.9975 |   0.9965 |   0.9954 |   0.9944 |   0.9987 |   0.9989 |   0.9986 |        0.407 |        0.401 |          2455.5
+        15 |   0.9978 |   0.9967 |   0.9955 |   0.9944 |   0.9988 |   0.9990 |   0.9986 |        0.407 |        0.402 |          2454.6
+        18 |   0.9982 |   0.9973 |   0.9963 |   0.9954 |   0.9990 |   0.9992 |   0.9989 |        0.407 |        0.401 |          2456.9
+---------------------------------------------------------------------------------------------------------------------------------------
+   Average |   0.9237 |   0.8948 |   0.8786 |   0.8670 |   0.9616 |   0.9627 |   0.9607 |        0.406 |        0.400 |          2461.0
+=======================================================================================================================================
+
+Results saved to: /tc1home/UG/zgoh033/DeepSC/diffusion_results_Rayleigh_channel_diffusion_ckpt.csv
+Predictions saved to: /tc1home/UG/zgoh033/DeepSC/diffusion_predictions_Rayleigh_channel_diffusion_ckpt.csv
+==================================================
+Job finished at: Tue Oct 13 01:40:41 PM +08 2026
+==================================================

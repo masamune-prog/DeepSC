@@ -90,6 +90,21 @@ parser.add_argument('--output-csv', default=None, type=str,
                          'diffusion_results_<channel>.csv in the checkpoint directory.')
 parser.add_argument('--predictions-csv', default=None, type=str,
                     help='Path for the per-sentence predictions CSV.')
+# Sampling method options
+parser.add_argument('--sampler', default='ddim', type=str,
+                    choices=['ddim', 'single'],
+                    help='Receiver sampling method: "ddim" for multi-step reverse_sample (DDIM), '
+                         '"single" for 1-step direct denoise_step (default: ddim)')
+parser.add_argument('--ddim-steps', default=10, type=int,
+                    help='Maximum number of DDIM reverse sampling steps (default: 10, capped at MAX_DDIM_STEPS)')
+parser.add_argument('--temperature', default=0.0, type=float,
+                    help='Sampling temperature for reverse_sample (default: 0.0 for greedy argmax, >0 for stochastic)')
+# Random seed options
+parser.add_argument('--seed', default=10, type=int,
+                    help='Base random seed (default: 10). Each eval epoch e is seeded with seed + e.')
+parser.add_argument('--epoch-seeds', nargs='+', type=int, default=None,
+                    help='Explicit seed for each eval epoch (e.g. --epoch-seeds 10 20). '
+                         'If fewer seeds than epochs are given, cycles through them. Overrides --seed.')
 # BERTScore options (mirrors performance.py)
 parser.add_argument('--bert-score', action='store_true',
                     help='Compute BERTScore semantic similarity in addition to BLEU')
@@ -380,6 +395,15 @@ def noise_to_snr_bin(noise_std: float, n_snr_bins: int = 19) -> int:
     return max(0, min(n_snr_bins - 1, round(snr_db)))
 
 
+def setup_seed(seed: int = 10):
+    """Seed all random number generators for reproducible evaluation."""
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+
+
 # Maximum DDIM denoising iterations. Running too many steps (e.g. 100+) causes
 # cumulative latent drift that collapses token predictions to repeated tokens.
 MAX_DDIM_STEPS = 10
@@ -387,51 +411,47 @@ MAX_DDIM_STEPS = 10
 
 @torch.no_grad()
 def reverse_sample(model: ChannelDiffusionLM, z_T, attention_mask=None,
-                   n_steps=None, t_start=None, snr_bin=None, temperature=0.8):
-    """DDIM-style deterministic reverse sampling (mirrors diffusion_attempt.py).
-
-    n_steps is capped at MAX_DDIM_STEPS=10 to prevent drift/token-collapse.
-    snr_bin: LongTensor [B] for SNR conditioning (0..n_snr_bins-1).
-    temperature: final decode temperature; <1 reduces token collapse.
-    """
+                        n_steps=None, t_start=None, snr_bin=None, temperature=0.0):
     T = model.cfg.diffusion_steps
-    if t_start is None:
-        t_start = T
-    t_start = max(1, min(T, int(t_start)))
-    n_steps = min(n_steps or t_start, MAX_DDIM_STEPS)
-    B   = z_T.size(0)
+    t_start = max(1, min(T, int(t_start if t_start is not None else T)))
+    
+    # Adaptive step scaling: clamp max steps by t_start
+    max_steps = 3 if (snr_bin is not None and snr_bin[0].item() >= 12) else 5
+    n_steps = max(1, min(n_steps or t_start, t_start, max_steps))
+    B = z_T.size(0)
+    dev = z_T.device
+    # Precompute schedule and exit index purely on CPU (NO .item() inside GPU loop)
+    ts_cpu = torch.linspace(t_start, 1, n_steps).long()
+    sigmas_cpu = model.sigmas.cpu()[ts_cpu]
+    
+    # Pre-allocate time tensors to avoid GPU allocation in each step
+    ts_gpu = ts_cpu.to(dev)
+    
     z_t = z_T
-    ts  = torch.linspace(t_start, 1, n_steps, device=z_T.device).long()
-    SIGMA_EARLY_EXIT = model.sigmas[2].item() if model.cfg.diffusion_steps >= 2 else 0.0
-
     for i in range(n_steps):
-        t_cur     = ts[i].expand(B)
+        t_cur = ts_gpu[i].expand(B)
         sigma_cur = model.sigmas[t_cur].view(-1, 1, 1)
-        z0_hat    = model.denoise_step(z_t, t_cur, mode_idx=0, attention_mask=attention_mask,
-                                       snr_bin=snr_bin)
-        is_last   = (i == n_steps - 1)
-        is_clean  = (sigma_cur.mean().item() <= SIGMA_EARLY_EXIT)
-        if is_last or is_clean:
+        z0_hat = model.denoise_step(z_t, t_cur, mode_idx=0, 
+                                    attention_mask=attention_mask, snr_bin=snr_bin)
+        # Check early exit or final step (computed without syncing GPU)
+        if i == n_steps - 1 or sigmas_cpu[i].item() <= 0.005:
             z_t = z0_hat
             break
-        sigma_next     = model.sigmas[ts[i + 1].expand(B)].view(-1, 1, 1)
-        raw_direction  = (z_t - z0_hat) / sigma_cur.clamp_min(1e-4)
+        sigma_next = model.sigmas[ts_gpu[i + 1].expand(B)].view(-1, 1, 1)
+        raw_direction = (z_t - z0_hat) / sigma_cur.clamp_min(1e-4)
         direction_norm = raw_direction.norm(dim=-1, keepdim=True).clamp_min(1e-6)
-        direction      = raw_direction * (direction_norm.clamp_max(10.0) / direction_norm)
-        z_t            = z0_hat + sigma_next * direction
-
+        direction = raw_direction * (direction_norm.clamp_max(10.0) / direction_norm)
+        z_t = z0_hat + sigma_next * direction
+    # Final projection
     snr_bin_final = snr_bin if snr_bin is not None else \
-                    torch.full((B,), model.cfg.n_snr_bins - 1, dtype=torch.long, device=z_T.device)
-    z_final   = model.denoise_step(z_t, torch.zeros(B, dtype=torch.long, device=z_T.device),
-                                   mode_idx=1, attention_mask=attention_mask,
-                                   snr_bin=snr_bin_final)
-    logits    = model.lm_head(z_final) / math.sqrt(model.cfg.d_model)
-
-    # Temperature-scaled sampling reduces token-collapse vs. greedy argmax.
+                    torch.full((B,), model.cfg.n_snr_bins - 1, dtype=torch.long, device=dev)
+    z_final = model.denoise_step(z_t, torch.zeros(B, dtype=torch.long, device=dev),
+                                 mode_idx=1, attention_mask=attention_mask,
+                                 snr_bin=snr_bin_final)
+    logits = model.lm_head(z_final) / math.sqrt(model.cfg.d_model)
     if temperature > 0 and temperature != 1.0:
         probs = F.softmax(logits / temperature, dim=-1)
-        B_, L_, V_ = probs.shape
-        token_ids = torch.multinomial(probs.view(-1, V_), num_samples=1).view(B_, L_)
+        token_ids = torch.multinomial(probs.view(-1, probs.shape[-1]), num_samples=1).view(B, -1)
     else:
         token_ids = logits.argmax(-1)
     return token_ids, logits
@@ -510,7 +530,8 @@ class TokenSentenceDataset(IterableDataset):
 
 @torch.no_grad()
 def decode_batch(model: ChannelDiffusionLM, batch: dict, noise_std: float,
-                 tokenizer, channel_type: str = "AWGN"):
+                 tokenizer, channel_type: str = "AWGN",
+                 sampler: str = "ddim", ddim_steps: int = 10, temperature: float = 0.0):
     """
     Run the full encode -> channel -> denoise -> decode pipeline for one batch.
 
@@ -518,10 +539,11 @@ def decode_batch(model: ChannelDiffusionLM, batch: dict, noise_std: float,
       1. Encode tokens to clean latent z0  (sender has mask: used for encode only).
       2. Transmit ONLY z_t = channel(z0, noise_std) over the physical channel.
          The attention_mask stays at the sender and is not sent.
-      3. Receiver: single denoise_step (mode=0, SNR-conditioned, NO mask).
-      4. Receiver: last-mile decode step (mode=1, t=0, SNR-conditioned, NO mask).
-      5. Greedy argmax over lm_head logits -> token ids.
-      6. [FIX 7] Receiver-side EOS detection: scan predicted token_ids for the
+      3. Receiver Denoise & Decode:
+         - If sampler == 'ddim': multi-step DDIM reverse_sample starting from
+           t_start = sigma_to_t(noise_std) down to 1 (capped at MAX_DDIM_STEPS).
+         - If sampler == 'single': 1-step denoise_step (mode=0) + last-mile (mode=1, t=0).
+      4. [FIX 7] Receiver-side EOS detection: scan predicted token_ids for the
          first <END> token and truncate there.  This is the ONLY mechanism by
          which the receiver learns where the sentence ends — no side-channel mask
          information is used.  Consistent with the training objective that trains
@@ -550,22 +572,34 @@ def decode_batch(model: ChannelDiffusionLM, batch: dict, noise_std: float,
     snr_bin_val = noise_to_snr_bin(noise_std, model.cfg.n_snr_bins)
     snr_bin     = torch.full((B,), snr_bin_val, dtype=torch.long, device=device)
 
-    # Step 3 — single denoising step (mode=0), receiver side.
-    # attention_mask=None: receiver has no access to the sender's padding mask.
-    t_val     = sigma_to_t(model, noise_std)
-    t_denoise = torch.full((B,), t_val, dtype=torch.long, device=device)
-    z0_hat    = model.denoise_step(z_t, t_denoise, mode_idx=0,
-                                   attention_mask=None, snr_bin=snr_bin)
+    # Step 3, 4, 5 — Receiver Denoising & Decoding
+    if sampler == "ddim":
+        t_start_ddim = sigma_to_t(model, noise_std)
+        token_ids, logits = reverse_sample(
+            model, z_t,
+            attention_mask=None,
+            n_steps=ddim_steps,
+            t_start=t_start_ddim,
+            snr_bin=snr_bin,
+            temperature=temperature,
+        )
+    else:
+        # Step 3 — single denoising step (mode=0), receiver side.
+        # attention_mask=None: receiver has no access to the sender's padding mask.
+        t_val     = sigma_to_t(model, noise_std)
+        t_denoise = torch.full((B,), t_val, dtype=torch.long, device=device)
+        z0_hat    = model.denoise_step(z_t, t_denoise, mode_idx=0,
+                                       attention_mask=None, snr_bin=snr_bin)
 
-    # Step 4 — last-mile decode (mode=1, t=0), receiver side.
-    # attention_mask=None: same reasoning — no mask transmitted.
-    t_zeros = torch.zeros(B, dtype=torch.long, device=device)
-    z_final = model.denoise_step(z0_hat, t_zeros, mode_idx=1,
-                                 attention_mask=None, snr_bin=snr_bin)
+        # Step 4 — last-mile decode (mode=1, t=0), receiver side.
+        # attention_mask=None: same reasoning — no mask transmitted.
+        t_zeros = torch.zeros(B, dtype=torch.long, device=device)
+        z_final = model.denoise_step(z0_hat, t_zeros, mode_idx=1,
+                                     attention_mask=None, snr_bin=snr_bin)
 
-    # Step 5 — greedy decode
-    logits    = model.lm_head(z_final) / math.sqrt(model.cfg.d_model)
-    token_ids = logits.argmax(-1)                       # [B, seq_len]
+        # Step 5 — greedy decode
+        logits    = model.lm_head(z_final) / math.sqrt(model.cfg.d_model)
+        token_ids = logits.argmax(-1)                       # [B, seq_len]
 
     # Step 6 — [FIX 7] Receiver-side EOS-based boundary detection.
     # The receiver scans its own predicted token_ids for the first <END> token.
@@ -636,6 +670,9 @@ def performance(args, SNR, model, test_loader, tokenizer, bert_scorer=None):
     all_sentences                                             = []
 
     # Optional Warmup
+    print(f"[*] Evaluation sampler: {args.sampler.upper()} "
+          f"(ddim_steps={args.ddim_steps if args.sampler == 'ddim' else 1}, "
+          f"temperature={args.temperature})")
     warmup_cnt = getattr(args, 'warmup_batches', 1)
     if warmup_cnt > 0:
         model.eval()
@@ -645,11 +682,26 @@ def performance(args, SNR, model, test_loader, tokenizer, bert_scorer=None):
             for i, batch in enumerate(test_loader):
                 if i >= warmup_cnt:
                     break
-                decode_batch(model, batch, noise_std, tokenizer, channel_type=args.channel)
+                decode_batch(model, batch, noise_std, tokenizer,
+                             channel_type=args.channel,
+                             sampler=args.sampler,
+                             ddim_steps=args.ddim_steps,
+                             temperature=args.temperature)
 
     model.eval()
     with torch.no_grad():
         for epoch in range(args.epochs):
+            if getattr(args, 'epoch_seeds', None) is not None and len(args.epoch_seeds) > 0:
+                epoch_seed = args.epoch_seeds[epoch % len(args.epoch_seeds)]
+            elif getattr(args, 'seed', None) is not None:
+                epoch_seed = args.seed + epoch
+            else:
+                epoch_seed = None
+
+            if epoch_seed is not None:
+                setup_seed(epoch_seed)
+                print(f"\n[*] Epoch {epoch + 1}/{args.epochs} RNG seed set to: {epoch_seed}")
+
             Tx_word = []
             Rx_word = []
 
@@ -669,7 +721,10 @@ def performance(args, SNR, model, test_loader, tokenizer, bert_scorer=None):
                 for batch in test_loader:
                     predicted, references, t_info = decode_batch(
                         model, batch, noise_std, tokenizer,
-                        channel_type=args.channel
+                        channel_type=args.channel,
+                        sampler=args.sampler,
+                        ddim_steps=args.ddim_steps,
+                        temperature=args.temperature,
                     )
                     word        += predicted
                     target_word += references
@@ -764,26 +819,20 @@ def performance(args, SNR, model, test_loader, tokenizer, bert_scorer=None):
 
 
 # ---------------------------------------------------------------------------
-# Seed helper
-# ---------------------------------------------------------------------------
-
-def setup_seed(seed: int = 10):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    torch.backends.cudnn.deterministic = True
-
-
-# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    setup_seed(10)
+    if args.epoch_seeds is not None and len(args.epoch_seeds) > 0:
+        initial_seed = args.epoch_seeds[0]
+    elif args.seed is not None:
+        initial_seed = args.seed
+    else:
+        initial_seed = 10
+    setup_seed(initial_seed)
 
-    SNR = [0, 3, 6, 9, 12, 15, 18]
+    SNR = [-18, -15, -12, -9, -6, -3, 0, 3, 6, 9, 12, 15, 18]
 
     # -----------------------------------------------------------------------
     # 1. Load checkpoint
@@ -987,6 +1036,20 @@ if __name__ == '__main__':
                 f' | {np.mean(time_stats["model_latency_ms"]):>12.3f}'
                 f' | {np.mean(time_stats["throughput_sps"]):>15.1f}')
     print(row_avg)
+
+    row_sd = (f'{"Std Dev":>10}'
+              f' | {np.std(bleu_scores["bleu1"]):>8.4f}'
+              f' | {np.std(bleu_scores["bleu2"]):>8.4f}'
+              f' | {np.std(bleu_scores["bleu3"]):>8.4f}'
+              f' | {np.std(bleu_scores["bleu4"]):>8.4f}')
+    if bert_scores:
+        row_sd += (f' | {np.std(bert_scores["f1"]):>8.4f}'
+                   f' | {np.std(bert_scores["precision"]):>8.4f}'
+                   f' | {np.std(bert_scores["recall"]):>8.4f}')
+    row_sd += (f' | {np.std(time_stats["latency_ms"]):>12.3f}'
+               f' | {np.std(time_stats["model_latency_ms"]):>12.3f}'
+               f' | {np.std(time_stats["throughput_sps"]):>15.1f}')
+    print(row_sd)
     print('='*sep_width)
 
     # -----------------------------------------------------------------------
@@ -1024,6 +1087,43 @@ if __name__ == '__main__':
                 record['bert_precision'] = round(float(bert_scores['precision'][i]), 6)
                 record['bert_recall']    = round(float(bert_scores['recall'][i]),    6)
             writer.writerow(record)
+
+        # Summary total stats: Average & Std Dev
+        avg_record = {
+            'channel':                   args.channel,
+            'checkpoint':                model_tag,
+            'snr_db':                    'Average',
+            'bleu1':                     round(float(np.mean(bleu_scores['bleu1'])), 6),
+            'bleu2':                     round(float(np.mean(bleu_scores['bleu2'])), 6),
+            'bleu3':                     round(float(np.mean(bleu_scores['bleu3'])), 6),
+            'bleu4':                     round(float(np.mean(bleu_scores['bleu4'])), 6),
+            'latency_ms_per_sent':       round(float(np.mean(time_stats['latency_ms'])), 4),
+            'model_latency_ms_per_sent': round(float(np.mean(time_stats['model_latency_ms'])), 4),
+            'throughput_sent_per_sec':   round(float(np.mean(time_stats['throughput_sps'])), 2),
+        }
+        if bert_scores:
+            avg_record['bert_f1']        = round(float(np.mean(bert_scores['f1'])),        6)
+            avg_record['bert_precision'] = round(float(np.mean(bert_scores['precision'])), 6)
+            avg_record['bert_recall']    = round(float(np.mean(bert_scores['recall'])),    6)
+        writer.writerow(avg_record)
+
+        sd_record = {
+            'channel':                   args.channel,
+            'checkpoint':                model_tag,
+            'snr_db':                    'Std Dev',
+            'bleu1':                     round(float(np.std(bleu_scores['bleu1'])), 6),
+            'bleu2':                     round(float(np.std(bleu_scores['bleu2'])), 6),
+            'bleu3':                     round(float(np.std(bleu_scores['bleu3'])), 6),
+            'bleu4':                     round(float(np.std(bleu_scores['bleu4'])), 6),
+            'latency_ms_per_sent':       round(float(np.std(time_stats['latency_ms'])), 4),
+            'model_latency_ms_per_sent': round(float(np.std(time_stats['model_latency_ms'])), 4),
+            'throughput_sent_per_sec':   round(float(np.std(time_stats['throughput_sps'])), 2),
+        }
+        if bert_scores:
+            sd_record['bert_f1']        = round(float(np.std(bert_scores['f1'])),        6)
+            sd_record['bert_precision'] = round(float(np.std(bert_scores['precision'])), 6)
+            sd_record['bert_recall']    = round(float(np.std(bert_scores['recall'])),    6)
+        writer.writerow(sd_record)
 
     print(f'\nResults saved to: {csv_path}')
 
