@@ -1,0 +1,75 @@
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/torch/nn/modules/transformer.py:385: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  warnings.warn(
+Epoch 1/5:   0%|          | 0/13 [00:00<?, ?it/s]Epoch 1/5:   8%|▊         | 1/13 [00:12<02:24, 12.05s/it]Epoch 1/5:  15%|█▌        | 2/13 [00:24<02:12, 12.07s/it]Epoch 1/5:  23%|██▎       | 3/13 [00:36<02:01, 12.10s/it]Epoch 1/5:  31%|███       | 4/13 [00:48<01:49, 12.14s/it]Epoch 1/5:  38%|███▊      | 5/13 [01:00<01:37, 12.18s/it]Epoch 1/5:  46%|████▌     | 6/13 [01:12<01:25, 12.21s/it]Epoch 1/5:  54%|█████▍    | 7/13 [01:25<01:13, 12.24s/it]Epoch 1/5:  62%|██████▏   | 8/13 [01:37<01:01, 12.27s/it]Epoch 1/5:  69%|██████▉   | 9/13 [01:49<00:49, 12.30s/it]Epoch 1/5:  77%|███████▋  | 10/13 [02:02<00:36, 12.33s/it]Epoch 1/5:  85%|████████▍ | 11/13 [02:14<00:24, 12.36s/it]Epoch 1/5:  92%|█████████▏| 12/13 [02:27<00:12, 12.38s/it]Epoch 1/5: 100%|██████████| 13/13 [02:39<00:00, 12.40s/it]Epoch 1/5: 100%|██████████| 13/13 [02:39<00:00, 12.28s/it]
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/nltk/translate/bleu_score.py:577: UserWarning: 
+The hypothesis contains 0 counts of 3-gram overlaps.
+Therefore the BLEU score evaluates to 0, independently of
+how many N-gram overlaps of lower order it contains.
+Consider using lower n-gram order or use SmoothingFunction()
+  warnings.warn(_msg)
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/nltk/translate/bleu_score.py:577: UserWarning: 
+The hypothesis contains 0 counts of 4-gram overlaps.
+Therefore the BLEU score evaluates to 0, independently of
+how many N-gram overlaps of lower order it contains.
+Consider using lower n-gram order or use SmoothingFunction()
+  warnings.warn(_msg)
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/nltk/translate/bleu_score.py:577: UserWarning: 
+The hypothesis contains 0 counts of 2-gram overlaps.
+Therefore the BLEU score evaluates to 0, independently of
+how many N-gram overlaps of lower order it contains.
+Consider using lower n-gram order or use SmoothingFunction()
+  warnings.warn(_msg)
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights: 100%|██████████| 199/199 [00:00<00:00, 2018.15it/s]
+[transformers] [1mBertModel LOAD REPORT[0m from: bert-base-multilingual-cased
+Key                                        | Status     |  | 
+-------------------------------------------+------------+--+-
+cls.predictions.bias                       | UNEXPECTED |  | 
+cls.predictions.transform.LayerNorm.bias   | UNEXPECTED |  | 
+cls.predictions.transform.dense.bias       | UNEXPECTED |  | 
+cls.predictions.transform.LayerNorm.weight | UNEXPECTED |  | 
+cls.seq_relationship.weight                | UNEXPECTED |  | 
+cls.predictions.transform.dense.weight     | UNEXPECTED |  | 
+cls.seq_relationship.bias                  | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/nltk/translate/bleu_score.py:577: UserWarning: 
+The hypothesis contains 0 counts of 3-gram overlaps.
+Therefore the BLEU score evaluates to 0, independently of
+how many N-gram overlaps of lower order it contains.
+Consider using lower n-gram order or use SmoothingFunction()
+  warnings.warn(_msg)
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/nltk/translate/bleu_score.py:577: UserWarning: 
+The hypothesis contains 0 counts of 4-gram overlaps.
+Therefore the BLEU score evaluates to 0, independently of
+how many N-gram overlaps of lower order it contains.
+Consider using lower n-gram order or use SmoothingFunction()
+  warnings.warn(_msg)
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/nltk/translate/bleu_score.py:577: UserWarning: 
+The hypothesis contains 0 counts of 2-gram overlaps.
+Therefore the BLEU score evaluates to 0, independently of
+how many N-gram overlaps of lower order it contains.
+Consider using lower n-gram order or use SmoothingFunction()
+  warnings.warn(_msg)
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Epoch 2/5:   0%|          | 0/13 [00:00<?, ?it/s]Epoch 2/5:   8%|▊         | 1/13 [00:12<02:26, 12.22s/it]Epoch 2/5:  15%|█▌        | 2/13 [00:24<02:14, 12.25s/it]Epoch 2/5:  23%|██▎       | 3/13 [00:36<02:02, 12.28s/it]Epoch 2/5:  31%|███       | 4/13 [00:49<01:50, 12.30s/it]Epoch 2/5:  38%|███▊      | 5/13 [01:01<01:38, 12.33s/it]Epoch 2/5:  46%|████▌     | 6/13 [01:13<01:26, 12.35s/it]Epoch 2/5:  54%|█████▍    | 7/13 [01:26<01:14, 12.37s/it]Epoch 2/5:  62%|██████▏   | 8/13 [01:38<01:01, 12.39s/it]Epoch 2/5:  69%|██████▉   | 9/13 [01:51<00:49, 12.41s/it]Epoch 2/5:  77%|███████▋  | 10/13 [02:03<00:37, 12.43s/it]Epoch 2/5:  85%|████████▍ | 11/13 [02:16<00:24, 12.45s/it]Epoch 2/5:  92%|█████████▏| 12/13 [02:28<00:12, 12.46s/it]Epoch 2/5: 100%|██████████| 13/13 [02:41<00:00, 12.46s/it]Epoch 2/5: 100%|██████████| 13/13 [02:41<00:00, 12.40s/it]
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Epoch 3/5:   0%|          | 0/13 [00:00<?, ?it/s]Epoch 3/5:   8%|▊         | 1/13 [00:12<02:26, 12.24s/it]Epoch 3/5:  15%|█▌        | 2/13 [00:24<02:14, 12.27s/it]Epoch 3/5:  23%|██▎       | 3/13 [00:36<02:02, 12.29s/it]Epoch 3/5:  31%|███       | 4/13 [00:49<01:50, 12.32s/it]Epoch 3/5:  38%|███▊      | 5/13 [01:01<01:38, 12.34s/it]Epoch 3/5:  46%|████▌     | 6/13 [01:13<01:26, 12.36s/it]Epoch 3/5:  54%|█████▍    | 7/13 [01:26<01:14, 12.38s/it]Epoch 3/5:  62%|██████▏   | 8/13 [01:38<01:01, 12.39s/it]Epoch 3/5:  69%|██████▉   | 9/13 [01:51<00:49, 12.41s/it]Epoch 3/5:  77%|███████▋  | 10/13 [02:03<00:37, 12.43s/it]Epoch 3/5:  85%|████████▍ | 11/13 [02:16<00:24, 12.46s/it]Epoch 3/5:  92%|█████████▏| 12/13 [02:28<00:12, 12.47s/it]Epoch 3/5: 100%|██████████| 13/13 [02:41<00:00, 12.48s/it]Epoch 3/5: 100%|██████████| 13/13 [02:41<00:00, 12.41s/it]
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Epoch 4/5:   0%|          | 0/13 [00:00<?, ?it/s]Epoch 4/5:   8%|▊         | 1/13 [00:12<02:27, 12.28s/it]Epoch 4/5:  15%|█▌        | 2/13 [00:24<02:15, 12.31s/it]Epoch 4/5:  23%|██▎       | 3/13 [00:36<02:03, 12.34s/it]Epoch 4/5:  31%|███       | 4/13 [00:49<01:51, 12.36s/it]Epoch 4/5:  38%|███▊      | 5/13 [01:01<01:39, 12.39s/it]Epoch 4/5:  46%|████▌     | 6/13 [01:14<01:26, 12.41s/it]Epoch 4/5:  54%|█████▍    | 7/13 [01:26<01:14, 12.43s/it]Epoch 4/5:  62%|██████▏   | 8/13 [01:39<01:02, 12.45s/it]Epoch 4/5:  69%|██████▉   | 9/13 [01:51<00:49, 12.47s/it]Epoch 4/5:  77%|███████▋  | 10/13 [02:04<00:37, 12.48s/it]Epoch 4/5:  85%|████████▍ | 11/13 [02:16<00:24, 12.50s/it]Epoch 4/5:  92%|█████████▏| 12/13 [02:29<00:12, 12.50s/it]Epoch 4/5: 100%|██████████| 13/13 [02:41<00:00, 12.51s/it]Epoch 4/5: 100%|██████████| 13/13 [02:41<00:00, 12.45s/it]
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.
+Epoch 5/5:   0%|          | 0/13 [00:00<?, ?it/s]Epoch 5/5:   8%|▊         | 1/13 [00:12<02:27, 12.28s/it]Epoch 5/5:  15%|█▌        | 2/13 [00:24<02:15, 12.31s/it]Epoch 5/5:  23%|██▎       | 3/13 [00:36<02:03, 12.34s/it]Epoch 5/5:  31%|███       | 4/13 [00:49<01:51, 12.36s/it]Epoch 5/5:  38%|███▊      | 5/13 [01:01<01:39, 12.39s/it]Epoch 5/5:  46%|████▌     | 6/13 [01:14<01:26, 12.40s/it]Epoch 5/5:  54%|█████▍    | 7/13 [01:26<01:14, 12.42s/it]Epoch 5/5:  62%|██████▏   | 8/13 [01:39<01:02, 12.44s/it]Epoch 5/5:  69%|██████▉   | 9/13 [01:51<00:49, 12.46s/it]Epoch 5/5:  77%|███████▋  | 10/13 [02:04<00:37, 12.48s/it]Epoch 5/5:  85%|████████▍ | 11/13 [02:16<00:24, 12.50s/it]Epoch 5/5:  92%|█████████▏| 12/13 [02:29<00:12, 12.51s/it]Epoch 5/5: 100%|██████████| 13/13 [02:41<00:00, 12.51s/it]Epoch 5/5: 100%|██████████| 13/13 [02:41<00:00, 12.45s/it]
+Warning: Empty candidate sentence detected; setting raw BERTscores to 0.

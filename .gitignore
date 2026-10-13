@@ -21,3 +21,7 @@ txt/
 finewebtxt/*
 0.parquet
 *.tgz
+*.csv
+*.pt
+*.pth
+*.ckpt

@@ -1,0 +1,22 @@
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/torch/nn/modules/transformer.py:385: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  warnings.warn(
+Epoch 1/2:   0%|          | 0/7 [00:00<?, ?it/s]Epoch 1/2:  14%|█▍        | 1/7 [00:30<03:02, 30.49s/it]Epoch 1/2:  29%|██▊       | 2/7 [01:01<02:32, 30.59s/it]Epoch 1/2:  43%|████▎     | 3/7 [01:31<02:02, 30.65s/it]Epoch 1/2:  57%|█████▋    | 4/7 [02:02<01:31, 30.66s/it]Epoch 1/2:  71%|███████▏  | 5/7 [02:33<01:01, 30.66s/it]Epoch 1/2:  86%|████████▌ | 6/7 [03:03<00:30, 30.68s/it]Epoch 1/2: 100%|██████████| 7/7 [03:34<00:00, 30.69s/it]Epoch 1/2: 100%|██████████| 7/7 [03:34<00:00, 30.66s/it]
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/nltk/translate/bleu_score.py:577: UserWarning: 
+The hypothesis contains 0 counts of 3-gram overlaps.
+Therefore the BLEU score evaluates to 0, independently of
+how many N-gram overlaps of lower order it contains.
+Consider using lower n-gram order or use SmoothingFunction()
+  warnings.warn(_msg)
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/nltk/translate/bleu_score.py:577: UserWarning: 
+The hypothesis contains 0 counts of 4-gram overlaps.
+Therefore the BLEU score evaluates to 0, independently of
+how many N-gram overlaps of lower order it contains.
+Consider using lower n-gram order or use SmoothingFunction()
+  warnings.warn(_msg)
+/tc1home/UG/zgoh033/DeepSC/.venv/lib/python3.12/site-packages/nltk/translate/bleu_score.py:577: UserWarning: 
+The hypothesis contains 0 counts of 2-gram overlaps.
+Therefore the BLEU score evaluates to 0, independently of
+how many N-gram overlaps of lower order it contains.
+Consider using lower n-gram order or use SmoothingFunction()
+  warnings.warn(_msg)
+Epoch 2/2:   0%|          | 0/7 [00:00<?, ?it/s]Epoch 2/2:  14%|█▍        | 1/7 [00:30<03:04, 30.73s/it]Epoch 2/2:  29%|██▊       | 2/7 [01:01<02:33, 30.76s/it]Epoch 2/2:  43%|████▎     | 3/7 [01:32<02:03, 30.79s/it]Epoch 2/2:  57%|█████▋    | 4/7 [02:03<01:32, 30.79s/it]Epoch 2/2:  71%|███████▏  | 5/7 [02:33<01:01, 30.78s/it]Epoch 2/2:  86%|████████▌ | 6/7 [03:04<00:30, 30.76s/it]Epoch 2/2: 100%|██████████| 7/7 [03:35<00:00, 30.75s/it]Epoch 2/2: 100%|██████████| 7/7 [03:35<00:00, 30.76s/it]
